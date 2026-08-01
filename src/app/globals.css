@@ -1,0 +1,276 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --background: #07111f;
+  --surface: #0a1727;
+  --surface-raised: #0c1b2d;
+  --text: #f4f7fb;
+  --muted: #94a3b8;
+  --accent: #67e8f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background:
+    radial-gradient(circle at 82% 10%, rgba(34, 211, 238, 0.07), transparent 28rem),
+    radial-gradient(circle at 12% 28%, rgba(99, 102, 241, 0.055), transparent 25rem),
+    var(--background);
+  color: var(--text);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(103, 232, 249, 0.24);
+  color: #ffffff;
+}
+
+a,
+button,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.page-shell {
+  width: min(100% - 2rem, 72rem);
+  margin-inline: auto;
+}
+
+.section-space {
+  padding-block: 3.5rem;
+}
+
+.hero-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.24;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.search-panel {
+  position: relative;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 1rem;
+  background: linear-gradient(145deg, rgba(12, 27, 45, 0.98), rgba(8, 21, 36, 0.98));
+  padding: 1.25rem;
+  box-shadow: 0 24px 60px rgba(1, 7, 15, 0.24);
+}
+
+.search-panel::before {
+  position: absolute;
+  top: -1px;
+  right: 8%;
+  left: 8%;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(103, 232, 249, 0.52), transparent);
+}
+
+.eyebrow {
+  color: #67e8f9;
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.form-label {
+  display: block;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.form-control {
+  width: 100%;
+  min-height: 3rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.625rem;
+  outline: none;
+  background: #071321;
+  padding: 0.7rem 0.875rem;
+  color: #f8fafc;
+  font-size: 0.875rem;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.form-control::placeholder {
+  color: #64748b;
+}
+
+.form-control:hover:not(:disabled) {
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+.form-control:focus-visible {
+  border-color: rgba(103, 232, 249, 0.75);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.13);
+}
+
+.form-select {
+  appearance: none;
+  padding-right: 2.5rem;
+}
+
+.form-select option {
+  background: #071321;
+  color: #f8fafc;
+}
+
+.primary-button,
+.secondary-button,
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 0.625rem;
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: center;
+  transition:
+    transform 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.primary-button {
+  border: 1px solid #67e8f9;
+  background: #67e8f9;
+  color: #06202a;
+}
+
+.primary-button:hover {
+  border-color: #a5f3fc;
+  background: #a5f3fc;
+}
+
+.secondary-button,
+.source-link {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.06);
+  color: #cbd5e1;
+}
+
+.secondary-button:hover,
+.source-link:hover {
+  border-color: rgba(103, 232, 249, 0.35);
+  color: #e0f2fe;
+}
+
+.primary-button:active,
+.secondary-button:active,
+.source-link:active {
+  transform: translateY(1px);
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.source-link:focus-visible,
+.nav-link:focus-visible,
+.footer-link:focus-visible {
+  outline: 2px solid #67e8f9;
+  outline-offset: 3px;
+}
+
+.nav-link {
+  min-height: 2.5rem;
+  align-items: center;
+  border-radius: 0.5rem;
+  padding-inline: 0.75rem;
+  color: #aebcd0;
+  font-weight: 600;
+  transition: color 150ms ease;
+}
+
+.nav-link:hover,
+.footer-link:hover {
+  color: #ffffff;
+}
+
+.job-card {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 0.875rem;
+  background: rgba(10, 23, 39, 0.9);
+  padding: 1.25rem;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+}
+
+.job-card:hover {
+  border-color: rgba(103, 232, 249, 0.23);
+  background: rgba(11, 27, 46, 0.96);
+  transform: translateY(-1px);
+}
+
+.footer-link {
+  border-radius: 0.25rem;
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: color 150ms ease;
+}
+
+@media (min-width: 640px) {
+  .page-shell {
+    width: min(100% - 3rem, 72rem);
+  }
+
+  .section-space {
+    padding-block: 4.5rem;
+  }
+
+  .search-panel,
+  .job-card {
+    padding: 1.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

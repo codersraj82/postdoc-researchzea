@@ -1,0 +1,17 @@
+{
+  "name": "Postdoc ResearchZeal",
+  "short_name": "Postdoc RZ",
+  "description": "Search Postdoc opportunities worldwide without creating an account.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
