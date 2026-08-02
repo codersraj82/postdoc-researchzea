@@ -4,9 +4,18 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:worker": "npm run build && wrangler dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:dry": "npm run build && wrangler deploy --dry-run",
+    "db:migrate:local": "wrangler d1 migrations apply postdoc-researchzeal-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply postdoc-researchzeal-db --remote",
+    "db:seed:local": "wrangler d1 execute postdoc-researchzeal-db --local --file=./seed/seed.sql",
+    "db:seed:remote": "wrangler d1 execute postdoc-researchzeal-db --remote --file=./seed/seed.sql",
+    "db:list:local": "wrangler d1 execute postdoc-researchzeal-db --local --command=\"SELECT id, title, country, deadline, is_demo FROM jobs ORDER BY posted_at DESC;\"",
+    "db:list:remote": "wrangler d1 execute postdoc-researchzeal-db --remote --command=\"SELECT id, title, country, deadline, is_demo FROM jobs ORDER BY posted_at DESC;\""
   },
   "dependencies": {
     "next": "16.2.12",
