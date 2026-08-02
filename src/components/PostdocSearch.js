@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import JobResults from "@/components/JobResults";
 import SearchFilters from "@/components/SearchFilters";
 import { filterJobs, getFilterOptions } from "@/lib/filterJobs";
+import { loadJobs } from "@/lib/loadJobs";
 
 const emptyFilters = {
   keyword: "",
@@ -15,19 +16,40 @@ const emptyFilters = {
 
 export default function PostdocSearch({ jobs, referenceDate }) {
   const [filters, setFilters] = useState(emptyFilters);
+  const [jobData, setJobData] = useState({
+    jobs,
+    source: "loading",
+  });
+  const [retryRequest, setRetryRequest] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    loadJobs(jobs, { signal: controller.signal })
+      .then((result) => {
+        setJobData(result);
+      })
+      .catch((error) => {
+        if (error?.name !== "AbortError") {
+          setJobData({ jobs, source: "fallback" });
+        }
+      });
+
+    return () => controller.abort();
+  }, [jobs, retryRequest]);
 
   const options = useMemo(
     () => ({
-      countries: getFilterOptions(jobs, "country"),
-      researchAreas: getFilterOptions(jobs, "research_area"),
-      languages: getFilterOptions(jobs, "language"),
+      countries: getFilterOptions(jobData.jobs, "country"),
+      researchAreas: getFilterOptions(jobData.jobs, "research_area"),
+      languages: getFilterOptions(jobData.jobs, "language"),
     }),
-    [jobs],
+    [jobData.jobs],
   );
 
   const filteredJobs = useMemo(
-    () => filterJobs(jobs, filters, new Date(referenceDate)),
-    [jobs, filters, referenceDate],
+    () => filterJobs(jobData.jobs, filters, new Date(referenceDate)),
+    [jobData.jobs, filters, referenceDate],
   );
 
   function handleFilterChange(name, value) {
@@ -36,6 +58,11 @@ export default function PostdocSearch({ jobs, referenceDate }) {
 
   function clearFilters() {
     setFilters(emptyFilters);
+  }
+
+  function retryDatabase() {
+    setJobData((current) => ({ ...current, source: "loading" }));
+    setRetryRequest((current) => current + 1);
   }
 
   function handleSubmit(event) {
@@ -62,6 +89,8 @@ export default function PostdocSearch({ jobs, referenceDate }) {
             onFilterChange={handleFilterChange}
             onClear={clearFilters}
             onSubmit={handleSubmit}
+            sourceStatus={jobData.source}
+            onRetryDatabase={retryDatabase}
           />
         </div>
         <div id="results" className="scroll-mt-6">

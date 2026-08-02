@@ -18,10 +18,6 @@ export default function JobResults({ jobs, referenceDate, onClear }) {
         </p>
       </div>
 
-      <div className="mt-5 rounded-xl border border-indigo-300/12 bg-indigo-300/[0.055] px-4 py-3 text-sm leading-6 text-indigo-100">
-        Demonstration listings are shown while the live jobs database is being prepared.
-      </div>
-
       <div className="mt-5 space-y-4">
         {jobs.length ? (
           jobs.map((job) => <JobCard key={job.id} job={job} referenceDate={referenceDate} />)

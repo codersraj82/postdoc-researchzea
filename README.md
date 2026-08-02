@@ -8,9 +8,9 @@ Postdoc ResearchZeal is a focused, no-signup search interface for discovering Po
 
 ## Current phase
 
-Phase 2: Static no-signup Postdoc search UI plus a read-only Cloudflare Worker and D1 jobs API.
+Phase 3: Static no-signup Postdoc search UI with D1 API loading and automatic local-data fallback.
 
-All positions shown in this phase are clearly labelled demonstration data. The homepage still uses local sample data; the API uses separate D1 demonstration data.
+All positions shown in this phase are clearly labelled demonstration data. The homepage loads D1 jobs when the API is available and automatically keeps the bundled sample jobs when it is not.
 
 ## Local development
 
@@ -54,13 +54,15 @@ Do not add Cloudflare credentials to this repository. The Worker configuration p
 
 - Search demonstration jobs across titles, institutions, places, descriptions, areas, and tags
 - Filter demonstration jobs by country, research area, language, and deadline
+- Load up to 100 jobs from the same-origin D1 API
+- Fall back automatically to bundled sample jobs when the API is unavailable or invalid
+- Retry the database from the compact source-status control
 - Open demonstration source and apply links safely in a new tab
 - Browse without login or profile creation
 - Use a responsive, accessible dark interface
 
 ## Not yet implemented
 
-- Frontend API loading
 - Manual admin entry
 - Email alerts
 - Turnstile
@@ -224,6 +226,36 @@ Static assets: out/
 - Resume upload
 - AI matching
 
-### Next phase
+### Phase 3 status
 
-Phase 3 will connect the frontend to `/api/jobs` and automatically fall back to local sample data when the API is unavailable.
+Phase 3 now connects the frontend to `/api/jobs` and automatically falls back to local sample data when the API is unavailable.
+
+## Phase 3 — Frontend API loading and fallback
+
+The statically exported homepage includes the bundled `sampleJobs` records in its initial HTML. After hydration, `PostdocSearch` requests:
+
+```text
+GET /api/jobs?limit=100
+```
+
+When the API returns a valid D1 response, the database jobs replace the bundled sample jobs. A valid response containing `jobs: []` is accepted as an empty database result and does not activate the fallback.
+
+The existing sample jobs remain visible when the request fails because of a network error, an unsuccessful HTTP status, invalid JSON, or an invalid response shape. The source status identifies the current state as:
+
+```text
+Checking live database
+Live database
+Sample data fallback
+```
+
+When fallback data is active, **Retry database** repeats the same API request without reloading the page. Search and filters continue to run locally against whichever job collection is active.
+
+For the combined local static-assets, Worker, and D1 environment, run:
+
+```bash
+npm run db:migrate:local
+npm run db:seed:local
+npm run dev:worker
+```
+
+Running only `npm run dev` starts Next.js without the Worker API, so the homepage will intentionally demonstrate the sample-data fallback behavior.
