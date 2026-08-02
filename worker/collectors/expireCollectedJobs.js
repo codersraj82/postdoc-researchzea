@@ -38,6 +38,25 @@ export async function expireCollectedJobs(db, now = new Date()) {
     ).bind(staleCutoff),
   ]);
 
+  await db.batch([
+    db.prepare(
+      `UPDATE job_sources SET observation_state = 'expired', updated_at = ?
+       WHERE job_id IN (
+         SELECT id FROM jobs
+         WHERE origin_type = 'collected' AND is_demo = 0
+           AND collection_state = 'expired'
+       )`,
+    ).bind(now.toISOString()),
+    db.prepare(
+      `UPDATE job_sources SET observation_state = 'stale', updated_at = ?
+       WHERE observation_state = 'active' AND job_id IN (
+         SELECT id FROM jobs
+         WHERE origin_type = 'collected' AND is_demo = 0
+           AND collection_state = 'stale'
+       )`,
+    ).bind(now.toISOString()),
+  ]);
+
   return {
     expired: changes(deadlineResult) + changes(ageExpiredResult),
     stale: changes(staleResult),

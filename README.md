@@ -8,9 +8,9 @@ Postdoc ResearchZeal is a focused, no-signup search interface for discovering Po
 
 ## Current phase
 
-Phase 7A: Static no-signup Postdoc search UI with D1 API loading, automatic local-data fallback, and scheduled collection from an approved RSS source.
+Phase 7B-A: Static no-signup Postdoc search UI with D1 API loading, automatic local-data fallback, and queue-based collection from four reviewed research sources.
 
-All positions shown in this phase are clearly labelled demonstration data. The homepage loads D1 jobs when the API is available and automatically keeps the bundled sample jobs when it is not.
+The homepage loads active real D1 jobs when available and automatically keeps the bundled demonstration jobs when the API is unavailable. D1 demonstrations are shown only when there are no active real collected jobs.
 
 ## Local development
 
@@ -326,3 +326,91 @@ Run the local scheduled request twice to verify that the second run updates veri
 7. Verify active real jobs, filters, original-source links, and application links on the public site.
 
 Codex did not apply a remote migration, deploy, or trigger production collection during Phase 7A implementation.
+
+## Phase 7B-A â€” Multi-source Position Hunter
+
+Phase 7B-A changes the existing twice-daily Cron from a crawler into a fast queue producer. A scheduled event creates one `collection_runs` row, deterministically selects enabled sources that are due, creates one queued `source_runs` row per source, and sends one controlled message per due source to `postdoc-source-collection`. The same `postdoc-researchzea` Worker remains the static-assets/API Worker, scheduler, Queue producer, and Queue consumer.
+
+The Queue contract contains only a version, generated message/run identifiers, a code-controlled source key, scheduled timestamp, and scheduled reason. It contains no arbitrary URL, HTML, description, cookie, credential, secret, or browser input. The consumer validates that contract, verifies the enabled registry entry and due state, then processes each source independently. Cloudflare Queue delivery is at least once, so message IDs, source-run uniqueness, source identities, canonical URLs, application URLs, content hashes, and D1 upserts make repeated delivery safe.
+
+### Queue resources
+
+```text
+Queue: postdoc-source-collection
+Dead-letter queue: postdoc-source-collection-dlq
+Producer binding: SOURCE_COLLECTION_QUEUE
+Consumer batch size: 1
+Consumer retries: 3
+Consumer concurrency cap: 2
+```
+
+Both queues must be created manually before the Phase 7B-A Worker configuration is deployed. Wrangler local development simulates Queue bindings, but the deterministic test suite uses synthetic batches and mocked acknowledgements/retries so it never requires a remote queue.
+
+### Source adapters
+
+Enabled sources:
+
+- `imechanica-job-channel`: existing RSS-first iMechanica source with robots-aware static fallback; twice daily.
+- `ornl-postdoctoral-jobs`: official Oak Ridge National Laboratory static careers pages; daily.
+- `berkeley-lab-postdoctoral`: official Berkeley Lab static careers pages; every 48 hours.
+- `embl-postdoctoral-jobs`: official EMBL public Workday JSON endpoint; daily.
+
+Pending/rejected source:
+
+- EURAXESS is not enabled. Its current robots policy disallows the required `/jobs/*` paths and its bounded job-search check returned HTTP 403.
+
+The registry declares allowed hosts/paths, language, frequency, request delay, timeout, response limit, page budgets, render mode, robots behavior, application rules, closure signals, and deterministic primary-source priority. No search-engine crawling, social-network scraping, login flow, CAPTCHA handling, WAF bypass, Browser Run, or anti-bot circumvention is implemented.
+
+### Per-source processing and health
+
+Each Queue delivery owns one `source_runs` record and records bounded page/item/job metrics. Network timeouts, HTTP 408/429, selected 5xx responses, DNS failures, and equivalent temporary errors are retried with bounded delays. Invalid messages and permanent policy, configuration, schema, or persistent 4xx failures are acknowledged without indefinite retry. A final temporary failure is recorded as dead-lettered before the Queue moves it to `postdoc-source-collection-dlq`.
+
+`collector_sources` tracks consecutive failures and `next_allowed_at`. One temporary failure waits for the next normal source interval; the second delays 12 hours, the third 24 hours, and the fourth or later 72 hours. A confirmed robots/policy prohibition blocks future collection until review. A single network failure never expires every job from that source.
+
+The parent collection run becomes terminal only after its expected source runs are terminal: all success is `success`, mixed success/failure is `partial`, no success is `failed`, no due sources is `skipped`, and any queued/running child keeps it `running`.
+
+### Job observations, language, and duplicates
+
+Migration `0004_multisource_queue.sql` adds `source_runs`, `job_sources`, source health/backoff fields, and `jobs.source_language`, `jobs.original_title`, and `jobs.original_description`. Existing collected jobs are backfilled into one primary observation when safe; seed demonstrations are preserved and are not added as collected observations.
+
+One public vacancy can have several `job_sources` observations. Strong duplicate evidence includes the same normalized official application URL, the same canonical official vacancy URL, the same reference plus institution, the same institution/exact title/deadline, or a strong compatible content hash. Similar titles alone are never merged. A deterministic priority prefers institution/laboratory-owned pages over official portals and reviewed feeds. Secondary attribution remains stored while the public API continues to expose one primary job row.
+
+Original source language and original title/description are stored separately from the bounded normalized display fields. Phase 7B-A performs no translation, AI extraction, semantic search, AI matching, manual upload, or manual job management.
+
+### Local validation
+
+```bash
+npm run test:collector
+npm run test:collector:live
+npm run lint
+npm run build
+npm run deploy:dry
+npm run db:migrate:local
+npx wrangler d1 execute postdoc-researchzeal-db --local --command="SELECT status, COUNT(*) FROM source_runs GROUP BY status;"
+npx wrangler d1 execute postdoc-researchzeal-db --local --command="SELECT job_id, COUNT(*) AS source_count FROM job_sources GROUP BY job_id;"
+git diff --check
+```
+
+The live test is deliberately separate from deterministic tests. It performs one bounded current-source validation and writes nothing to D1. For local end-to-end API/frontend review, start `npm run dev:worker`; do not point local testing at production D1.
+
+### Manual production order (do not run as part of local implementation)
+
+1. Review Phase 7B-A source policy, migration, queue handler, tests, and dry-run output.
+2. Create the production resources manually:
+
+   ```bash
+   npx wrangler queues create postdoc-source-collection
+   npx wrangler queues create postdoc-source-collection-dlq
+   ```
+
+3. Apply migration 0004 before deploying the new Worker:
+
+   ```bash
+   npm run db:migrate:remote
+   ```
+
+4. Commit, push, review, and merge through the normal Git workflow so the connected Cloudflare build deploys the Worker and static assets.
+5. Verify the Queue producer, Queue consumer, DLQ, D1, Assets, and existing `17 1,13 * * *` UTC Cron bindings in Cloudflare.
+6. Observe the first scheduled fan-out and confirm each source run, source health state, job observation, public API result, search/filter behavior, and external links.
+
+Migration 0004 and both queues are prerequisites for the Phase 7B-A Worker. This implementation does not create remote queues, apply the remote migration, deploy, trigger production collection, or modify production D1.
