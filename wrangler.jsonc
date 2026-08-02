@@ -17,7 +17,7 @@
 		{
 			"binding": "DB",
 			"database_name": "postdoc-researchzeal-db",
-             "database_id": "THE-REAL-UUID-FROM-CLOUDFLARE",
+             
 			"migrations_dir": "./migrations",
 			"database_id": "5277602b-2646-483e-a42c-4f200597cc9a"
 		}
