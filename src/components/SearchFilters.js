@@ -16,6 +16,45 @@ function SearchIcon() {
   );
 }
 
+function SourceStatus({ status, onRetryDatabase }) {
+  const statusDetails = {
+    loading: {
+      label: "Checking live database",
+      dotClassName: "animate-pulse bg-cyan-300",
+    },
+    d1: {
+      label: "Live database",
+      dotClassName: "bg-emerald-300",
+    },
+    fallback: {
+      label: "Sample data fallback",
+      dotClassName: "bg-amber-300",
+    },
+  };
+  const details = statusDetails[status] ?? statusDetails.loading;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+      <span
+        className={`size-1.5 rounded-full ${details.dotClassName}`}
+        aria-hidden="true"
+      />
+      <span role="status" aria-live="polite" aria-atomic="true">
+        {details.label}
+      </span>
+      {status === "fallback" && (
+        <button
+          type="button"
+          onClick={onRetryDatabase}
+          className="rounded-md border border-amber-300/20 bg-amber-300/8 px-2 py-1 font-semibold text-amber-200 transition hover:border-amber-300/35 hover:bg-amber-300/12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+        >
+          Retry database
+        </button>
+      )}
+    </div>
+  );
+}
+
 function SelectField({ id, label, value, onChange, options, allLabel }) {
   return (
     <div>
@@ -49,6 +88,8 @@ export default function SearchFilters({
   onFilterChange,
   onClear,
   onSubmit,
+  sourceStatus,
+  onRetryDatabase,
 }) {
   return (
     <form onSubmit={onSubmit} aria-label="Search Postdoc positions">
@@ -136,10 +177,7 @@ export default function SearchFilters({
       </div>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-5">
-        <p className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="size-1.5 rounded-full bg-cyan-300" />
-          Updated with sample data
-        </p>
+        <SourceStatus status={sourceStatus} onRetryDatabase={onRetryDatabase} />
         <button type="button" onClick={onClear} className="secondary-button min-h-10">
           Clear filters
         </button>
