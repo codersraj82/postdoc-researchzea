@@ -1,3 +1,10 @@
+import { runCollection } from "./collectors/runCollection.js";
+import {
+  hasActiveCollectedJobs,
+  normalizeDemoFlag,
+  publicDatasetCondition,
+} from "./collectors/publicJobs.js";
+
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
   "Cache-Control": "no-store",
@@ -83,7 +90,7 @@ function mapJobRow(row) {
     employment_type: row.employment_type,
     duration: row.duration,
     tags: parseTags(row.tags_json),
-    is_demo: Number(row.is_demo) === 1,
+    is_demo: normalizeDemoFlag(row.is_demo),
   };
 }
 
@@ -109,9 +116,10 @@ function getFilters(searchParams) {
   };
 }
 
-function buildJobFilters(filters) {
+function buildJobFilters(filters, datasetCondition) {
   const conditions = [
     "is_active = 1",
+    datasetCondition,
     "(deadline IS NULL OR date(deadline) >= date('now'))",
   ];
   const values = [];
@@ -218,21 +226,24 @@ async function handleJobs(url, env) {
     0,
     MAX_OFFSET,
   );
-  const { whereClause, values } = buildJobFilters(filters);
-
-  const jobsQuery = `
-    SELECT
-      id, title, institution, country, city, research_area, language,
-      description, apply_url, source_url, deadline, posted_at,
-      created_at, updated_at, employment_type, duration, tags_json, is_demo
-    FROM jobs
-    ${whereClause}
-    ORDER BY posted_at DESC, created_at DESC
-    LIMIT ? OFFSET ?
-  `;
-  const countQuery = `SELECT COUNT(*) AS total FROM jobs ${whereClause}`;
 
   try {
+    const useCollectedJobs = await hasActiveCollectedJobs(env.DB);
+    const { whereClause, values } = buildJobFilters(
+      filters,
+      publicDatasetCondition(useCollectedJobs),
+    );
+    const jobsQuery = `
+      SELECT
+        id, title, institution, country, city, research_area, language,
+        description, apply_url, source_url, deadline, posted_at,
+        created_at, updated_at, employment_type, duration, tags_json, is_demo
+      FROM jobs
+      ${whereClause}
+      ORDER BY posted_at DESC, created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    const countQuery = `SELECT COUNT(*) AS total FROM jobs ${whereClause}`;
     const jobsStatement = env.DB.prepare(jobsQuery).bind(...values, limit, offset);
     const countStatement = env.DB.prepare(countQuery).bind(...values);
     const [jobsResult, countResult] = await env.DB.batch([
@@ -302,6 +313,37 @@ const worker = {
         "INTERNAL_ERROR",
         "An unexpected server error occurred.",
       );
+    }
+  },
+
+  async scheduled(controller, env, ctx) {
+    void ctx;
+    try {
+      const summary = await runCollection(env, {
+        triggerType: "scheduled",
+        cron: controller.cron,
+        now: new Date(controller.scheduledTime),
+      });
+      console.log("Postdoc collection completed.", {
+        runId: summary.runId,
+        status: summary.status,
+        sourcesAttempted: summary.sourcesAttempted,
+        sourcesSucceeded: summary.sourcesSucceeded,
+        itemsReceived: summary.itemsReceived,
+        itemsAccepted: summary.itemsAccepted,
+        itemsRejected: summary.itemsRejected,
+        jobsInserted: summary.jobsInserted,
+        jobsUpdated: summary.jobsUpdated,
+        jobsUnchanged: summary.jobsUnchanged,
+        jobsExpired: summary.jobsExpired,
+        errorCount: summary.errorCount,
+        durationMs: summary.durationMs,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown scheduled collection failure.";
+      console.error("Postdoc collection failed.", {
+        message: message.replace(/[\r\n\t]+/g, " ").slice(0, 300),
+      });
     }
   },
 };

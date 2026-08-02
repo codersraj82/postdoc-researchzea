@@ -8,7 +8,7 @@ Postdoc ResearchZeal is a focused, no-signup search interface for discovering Po
 
 ## Current phase
 
-Phase 3: Static no-signup Postdoc search UI with D1 API loading and automatic local-data fallback.
+Phase 7A: Static no-signup Postdoc search UI with D1 API loading, automatic local-data fallback, and scheduled collection from an approved RSS source.
 
 All positions shown in this phase are clearly labelled demonstration data. The homepage loads D1 jobs when the API is available and automatically keeps the bundled sample jobs when it is not.
 
@@ -52,21 +52,19 @@ Do not add Cloudflare credentials to this repository. The Worker configuration p
 
 ## Current capabilities
 
-- Search demonstration jobs across titles, institutions, places, descriptions, areas, and tags
-- Filter demonstration jobs by country, research area, language, and deadline
+- Search jobs across titles, institutions, places, descriptions, areas, and tags
+- Filter jobs by country, research area, language, and deadline
 - Load up to 100 jobs from the same-origin D1 API
 - Fall back automatically to bundled sample jobs when the API is unavailable or invalid
 - Retry the database from the compact source-status control
-- Open demonstration source and apply links safely in a new tab
+- Open original-source and application links safely in a new tab
 - Browse without login or profile creation
 - Use a responsive, accessible dark interface
 
 ## Not yet implemented
 
-- Manual admin entry
 - Email alerts
 - Turnstile
-- Automatic job collection
 - Profiles
 - Resume upload
 - AI matching
@@ -77,10 +75,10 @@ Do not add Cloudflare credentials to this repository. The Worker configuration p
 2. Results cards and filters
 3. D1 jobs database
 4. Cloudflare Worker search API
-5. Manual job-entry workflow
-6. Email-alert signup
-7. Weekly email alert system
-8. Automatic job collection
+5. Frontend API loading and automatic fallback
+6. Production hardening
+7. Automatic job collection from reviewed sources
+8. Optional email alerts
 9. Optional profiles
 10. Optional resume-based AI matching
 
@@ -259,3 +257,72 @@ npm run dev:worker
 ```
 
 Running only `npm run dev` starts Next.js without the Worker API, so the homepage will intentionally demonstrate the sample-data fallback behavior.
+
+## Phase 7A — Automatic job collection
+
+Phase 7A collects postdoctoral openings automatically through a Cloudflare Worker Cron Trigger. No manual job upload is required, and the project contains no job editor, admin dashboard, authentication flow, manual approval workflow, or public collection-trigger endpoint.
+
+The only enabled source is the reviewed `iMechanica Job Channel`. Collection first requests the canonical RSS feed at `https://imechanica.org/taxonomy/term/73/feed`. Only when RSS fails does it use the approved static listing at `https://imechanica.org/taxonomy/term/73`; a successful RSS run does not crawl HTML. The source registry is code-controlled. Adding another source requires its own reviewed adapter and safety policy; browser forms cannot supply source URLs. Broad generic crawling, search-engine scraping, social-media scraping, and access-control bypasses are not implemented.
+
+The Cron Trigger runs at `17 1,13 * * *`, or 01:17 and 13:17 UTC. Cloudflare Cron expressions use UTC.
+
+Collection behavior:
+
+- Uses strict, deterministic postdoctoral terms; PhD-only and faculty-only entries are rejected.
+- Fetches only registered HTTPS hosts with a timeout, a response-size limit, conditional requests, controlled redirects, and at most one retry.
+- Parses XML without document type declarations or external entity resolution.
+- Evaluates `robots.txt` before HTML fallback, respects the applicable `ResearchZealBot` or wildcard rules and crawl delay, and fails closed when policy cannot be evaluated.
+- Treats `Content-Signal: search=no` as a prohibition on HTML indexing.
+- Bounds HTML fallback to two listing pages, ten same-host detail pages, crawl depth one, sequential requests, and a minimum one-second same-host delay.
+- Prefers valid JobPosting JSON-LD and otherwise extracts deterministic visible page signals through Cloudflare `HTMLRewriter`.
+- Normalizes factual metadata and stores only a short plain-text excerpt, not the complete external advertisement.
+- Selects application links only from bounded main-vacancy content, rejects taxonomy/navigation/profile/asset/unsafe links, ranks explicit application and official vacancy URLs, and uses the individual source detail page for email-only applications.
+- Preserves source attribution, original-source links, feed identity, and publication date while normalizing only explicitly supported institution, country, deadline, and duration evidence.
+- Prevents duplicates across RSS and HTML by canonical detail URL and source identity, leaves unchanged jobs intact, and updates changed source records without replacing stronger metadata with blank values.
+- Marks collected jobs stale after 45 unseen days and expired after 75 unseen days, and expires jobs with known past deadlines.
+- Keeps stale and expired collected jobs stored but hides them from the public API.
+- Keeps all demonstration records stored. Demonstrations remain public until at least one active real collected job exists, then are hidden automatically.
+- Never modifies seed or demonstration jobs through collection or lifecycle maintenance.
+
+Collection runs store bounded operational metrics in D1. Full RSS responses, full descriptions, secrets, cookies, and exception stack traces are not retained.
+
+Browser Run is intentionally deferred. iMechanica exposes ordinary HTML, so Phase 7A adds no Browser binding and makes no production browser-rendering calls. A future dynamic source would require a separate source review and approved-host adapter.
+
+### Local validation
+
+```bash
+npm run test:collector
+npm run lint
+npm run build
+npm run deploy:dry
+npx wrangler d1 migrations apply postdoc-researchzeal-db --local
+npm run dev:worker
+```
+
+The collector tests are deterministic and use fictional minimal fixtures. The optional `npm run test:collector:live` command checks current availability of the approved feed and does not write to D1.
+
+With `npm run dev:worker` running, invoke the local scheduled handler from another terminal:
+
+```bash
+curl "http://localhost:8787/cdn-cgi/handler/scheduled?format=json"
+```
+
+PowerShell equivalent:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8787/cdn-cgi/handler/scheduled?format=json"
+```
+
+Run the local scheduled request twice to verify that the second run updates verification timestamps without inserting duplicates. Inspect the local API at `http://localhost:8787/api/jobs?limit=100` to confirm the automatic transition from demonstration jobs to active real jobs.
+
+### Manual production order
+
+1. Review the collector code and additive migration.
+2. Apply the additive migration to production D1 manually through the approved operator workflow.
+3. Merge the feature branch into `main` after review.
+4. Allow the Git-connected Cloudflare deployment to complete.
+5. Verify the Cron Trigger uses `17 1,13 * * *` in UTC.
+6. Check collection events and short structured Worker logs.
+7. Verify active real jobs, filters, original-source links, and application links on the public site.
+
+Codex did not apply a remote migration, deploy, or trigger production collection during Phase 7A implementation.

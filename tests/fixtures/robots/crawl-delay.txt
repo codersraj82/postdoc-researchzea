@@ -1,0 +1,3 @@
+User-agent: ResearchZealBot
+Allow: /
+Crawl-delay: 2
