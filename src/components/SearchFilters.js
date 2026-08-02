@@ -99,7 +99,10 @@ export default function SearchFilters({
         </label>
         <div className="mt-2 grid gap-3 sm:grid-cols-[1fr_auto]">
           <div className="relative">
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+            <span
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+              aria-hidden="true"
+            >
               <SearchIcon />
             </span>
             <input
@@ -108,7 +111,7 @@ export default function SearchFilters({
               type="search"
               value={filters.keyword}
               onChange={(event) => onFilterChange("keyword", event.target.value)}
-              className="form-control min-h-13 pl-12 sm:text-base"
+              className="form-control keyword-input min-h-13 sm:text-base"
               placeholder="Search by topic, skill, institution, or keyword"
               autoComplete="off"
             />

@@ -1,5 +1,10 @@
 import { formatDate } from "@/lib/formatDate";
 import { isClosingSoon } from "@/lib/filterJobs";
+import {
+  areEquivalentJobUrls,
+  formatJobLocation,
+  isDemonstrationJob,
+} from "@/lib/jobPresentation";
 
 function ExternalLinkIcon() {
   return (
@@ -12,6 +17,12 @@ function ExternalLinkIcon() {
 
 export default function JobCard({ job, referenceDate }) {
   const closingSoon = isClosingSoon(job, new Date(referenceDate));
+  const location = formatJobLocation(job);
+  const isDemo = isDemonstrationJob(job);
+  const hasSingleApplicationDestination = areEquivalentJobUrls(
+    job.apply_url,
+    job.source_url,
+  );
 
   return (
     <article className="job-card">
@@ -29,9 +40,7 @@ export default function JobCard({ job, referenceDate }) {
             {job.title}
           </h3>
           <p className="mt-2 font-medium text-slate-300">{job.institution}</p>
-          <p className="mt-1 text-sm text-slate-400">
-            {job.city}, {job.country} <span aria-hidden="true">·</span> {job.language}
-          </p>
+          {location && <p className="mt-1 text-sm text-slate-400">{location}</p>}
         </div>
 
         <div className="grid shrink-0 grid-cols-2 gap-3 lg:min-w-52 lg:grid-cols-1">
@@ -55,7 +64,7 @@ export default function JobCard({ job, referenceDate }) {
         </div>
       </div>
 
-      <p className="mt-5 max-w-4xl text-sm leading-6 text-slate-300 sm:text-[0.94rem]">
+      <p className="mt-5 line-clamp-5 max-w-4xl text-sm leading-6 text-slate-300 sm:text-[0.94rem]">
         {job.description}
       </p>
 
@@ -71,10 +80,10 @@ export default function JobCard({ job, referenceDate }) {
         <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-400">
           {job.employment_type && <span>{job.employment_type}</span>}
           {job.duration && <span>{job.duration}</span>}
-          <span>Demonstration listing</span>
+          {isDemo && <span>Demonstration listing</span>}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {job.source_url && (
+          {job.source_url && !hasSingleApplicationDestination && (
             <a
               href={job.source_url}
               target="_blank"
@@ -86,16 +95,20 @@ export default function JobCard({ job, referenceDate }) {
               <ExternalLinkIcon />
             </a>
           )}
-          <a
-            href={job.apply_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="primary-button min-h-11"
-            aria-label={`View and apply for ${job.title} (opens in a new tab)`}
-          >
-            View &amp; Apply
-            <ExternalLinkIcon />
-          </a>
+          {job.apply_url && (
+            <a
+              href={job.apply_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="primary-button min-h-11"
+              aria-label={hasSingleApplicationDestination
+                ? `View application details for ${job.title} (opens in a new tab)`
+                : `View and apply for ${job.title} (opens in a new tab)`}
+            >
+              {hasSingleApplicationDestination ? "View application details" : "View & Apply"}
+              <ExternalLinkIcon />
+            </a>
+          )}
         </div>
       </div>
     </article>

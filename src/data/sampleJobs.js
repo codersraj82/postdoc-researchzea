@@ -282,6 +282,7 @@ export function getSampleJobs(referenceDate = new Date()) {
       employment_type: template.employment_type,
       duration: template.duration,
       tags: [...template.tags],
+      is_demo: true,
     };
   });
 }

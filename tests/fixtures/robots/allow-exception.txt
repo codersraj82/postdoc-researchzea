@@ -1,0 +1,3 @@
+User-agent: *
+Disallow: /taxonomy/
+Allow: /taxonomy/term/73

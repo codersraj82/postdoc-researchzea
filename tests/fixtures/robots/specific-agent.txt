@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /
+
+User-agent: ResearchZealBot
+Disallow: /
+Allow: /taxonomy/term/73
+Allow: /fictional-postdoc

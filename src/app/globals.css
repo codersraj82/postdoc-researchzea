@@ -128,6 +128,11 @@ button {
   color: #64748b;
 }
 
+.keyword-input {
+  padding-right: 1rem;
+  padding-left: 3rem;
+}
+
 .form-control:hover:not(:disabled) {
   border-color: rgba(148, 163, 184, 0.34);
 }

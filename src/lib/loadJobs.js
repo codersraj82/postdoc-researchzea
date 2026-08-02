@@ -19,7 +19,8 @@ function isJobRecord(job) {
     requiredStringFields.every(
       (field) => typeof job[field] === "string" && job[field].trim().length > 0,
     ) &&
-    Array.isArray(job.tags)
+    Array.isArray(job.tags) &&
+    typeof job.is_demo === "boolean"
   );
 }
 
