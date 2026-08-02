@@ -42,7 +42,7 @@ const baseJob = {
 test("duplicate items insert once and then use unchanged handling", async () => {
   const repository = fakeRepository();
   const result = await storeCollectedJobs([baseJob, baseJob], repository);
-  assert.deepEqual(result, { inserted: 1, updated: 0, unchanged: 1 });
+  assert.deepEqual(result, { inserted: 1, updated: 0, unchanged: 1, duplicatesMerged: 0 });
   assert.deepEqual(repository.calls, { insert: 1, touch: 1, update: 0 });
 });
 
@@ -50,7 +50,7 @@ test("changed item updates the existing collected record", async () => {
   const repository = fakeRepository();
   await storeCollectedJobs([baseJob], repository);
   const result = await storeCollectedJobs([{ ...baseJob, content_hash: "hash-two" }], repository);
-  assert.deepEqual(result, { inserted: 0, updated: 1, unchanged: 0 });
+  assert.deepEqual(result, { inserted: 0, updated: 1, unchanged: 0, duplicatesMerged: 0 });
   assert.equal(repository.calls.update, 1);
 });
 

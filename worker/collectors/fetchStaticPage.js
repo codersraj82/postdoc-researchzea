@@ -4,7 +4,8 @@ import {
 } from "./urlSafety.js";
 
 const HTML_TYPES = new Set(["application/xhtml+xml", "text/html"]);
-const ROBOTS_TYPES = new Set(["text/plain", "text/robots"]);
+const ROBOTS_TYPES = new Set(["text/plain", "text/robots", "text/html"]);
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
 async function readBoundedBody(response, maximumBytes) {
   const contentLength = Number(response.headers.get("content-length"));
@@ -71,7 +72,11 @@ export async function fetchStaticPage(url, policy, options = {}) {
         continue;
       }
       if (!response.ok) {
-        throw new SourcePolicyError(`HTML source returned HTTP ${response.status}.`, "HTML_HTTP_ERROR");
+        throw new SourcePolicyError(
+          `HTML source returned HTTP ${response.status}.`,
+          "HTML_HTTP_ERROR",
+          { retryable: RETRYABLE_STATUS.has(response.status), status: response.status },
+        );
       }
 
       const type = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() ?? "";
@@ -90,9 +95,17 @@ export async function fetchStaticPage(url, policy, options = {}) {
   } catch (error) {
     if (error instanceof SourcePolicyError) throw error;
     if (error?.name === "AbortError") {
-      throw new SourcePolicyError("HTML source request timed out.", "HTML_TIMEOUT");
+      throw new SourcePolicyError(
+        "HTML source request timed out.",
+        "HTML_TIMEOUT",
+        { retryable: true },
+      );
     }
-    throw new SourcePolicyError("HTML source network request failed.", "HTML_NETWORK_ERROR");
+    throw new SourcePolicyError(
+      "HTML source network request failed.",
+      "HTML_NETWORK_ERROR",
+      { retryable: true },
+    );
   } finally {
     clearTimeout(timeoutId);
   }

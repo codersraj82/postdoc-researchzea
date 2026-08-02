@@ -77,10 +77,11 @@ export async function loadRobotsPolicy(source, options = {}) {
       maximumBytes: 256 * 1024,
       timeoutMs: policy.timeoutMs,
     });
-  } catch {
+  } catch (error) {
     throw new SourcePolicyError(
       "Robots policy could not be evaluated safely.",
       "ROBOTS_UNAVAILABLE",
+      { retryable: error?.retryable === true },
     );
   }
   if (!contentSignalAllowsSearch(response.contentSignal)) {

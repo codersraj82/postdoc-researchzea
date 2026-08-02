@@ -218,7 +218,7 @@ test("RSS first then HTML updates one canonical record", async () => {
   const repository = memoryRepository();
   const rss = await normalizedObservation("https://imechanica.org/shared-postdoc", "rss", "A postdoctoral opening.");
   const html = await normalizedObservation("https://imechanica.org/shared-postdoc", "html", "Current postdoctoral detail-page content at Example Institute.");
-  assert.deepEqual(await storeCollectedJobs([rss], repository), { inserted: 1, updated: 0, unchanged: 0 });
+  assert.deepEqual(await storeCollectedJobs([rss], repository), { inserted: 1, updated: 0, unchanged: 0, duplicatesMerged: 0 });
   const result = await storeCollectedJobs([html], repository);
   assert.equal(result.inserted, 0);
   assert.equal(repository.rows.size, 1);
@@ -241,7 +241,7 @@ test("same title with different canonical URLs stays separate", async () => {
   const first = await normalizedObservation("https://imechanica.org/postdoc-one", "html", "First postdoctoral opening.");
   const second = await normalizedObservation("https://imechanica.org/postdoc-two", "html", "Second postdoctoral opening.");
   const result = await storeCollectedJobs([first, second], repository);
-  assert.deepEqual(result, { inserted: 2, updated: 0, unchanged: 0 });
+  assert.deepEqual(result, { inserted: 2, updated: 0, unchanged: 0, duplicatesMerged: 0 });
   assert.equal(repository.rows.size, 2);
 });
 

@@ -1,9 +1,10 @@
-import { runCollection } from "./collectors/runCollection.js";
+import { consumeSourceQueue } from "./collectors/consumeSourceQueue.js";
 import {
   hasActiveCollectedJobs,
   normalizeDemoFlag,
   publicDatasetCondition,
 } from "./collectors/publicJobs.js";
+import { scheduleDueSources } from "./collectors/scheduleSources.js";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -80,6 +81,9 @@ function mapJobRow(row) {
     city: row.city,
     research_area: row.research_area,
     language: row.language,
+    source_language: row.source_language ?? "unknown",
+    source_count: Number(row.source_count ?? 1),
+    last_verified_at: row.last_verified_at ?? null,
     description: row.description,
     apply_url: row.apply_url,
     source_url: row.source_url,
@@ -237,7 +241,10 @@ async function handleJobs(url, env) {
       SELECT
         id, title, institution, country, city, research_area, language,
         description, apply_url, source_url, deadline, posted_at,
-        created_at, updated_at, employment_type, duration, tags_json, is_demo
+        created_at, updated_at, employment_type, duration, tags_json, is_demo,
+        source_language, last_verified_at,
+        (SELECT COUNT(*) FROM job_sources js
+         WHERE js.job_id = jobs.id AND js.observation_state = 'active') AS source_count
       FROM jobs
       ${whereClause}
       ORDER BY posted_at DESC, created_at DESC
@@ -319,32 +326,35 @@ const worker = {
   async scheduled(controller, env, ctx) {
     void ctx;
     try {
-      const summary = await runCollection(env, {
-        triggerType: "scheduled",
-        cron: controller.cron,
+      const summary = await scheduleDueSources(env, controller, {
         now: new Date(controller.scheduledTime),
       });
-      console.log("Postdoc collection completed.", {
+      console.log(JSON.stringify({
+        event: "source_collection_scheduled",
         runId: summary.runId,
-        status: summary.status,
-        sourcesAttempted: summary.sourcesAttempted,
-        sourcesSucceeded: summary.sourcesSucceeded,
-        itemsReceived: summary.itemsReceived,
-        itemsAccepted: summary.itemsAccepted,
-        itemsRejected: summary.itemsRejected,
-        jobsInserted: summary.jobsInserted,
-        jobsUpdated: summary.jobsUpdated,
-        jobsUnchanged: summary.jobsUnchanged,
-        jobsExpired: summary.jobsExpired,
-        errorCount: summary.errorCount,
-        durationMs: summary.durationMs,
-      });
+        dueSources: summary.dueSources,
+        messagesQueued: summary.messagesQueued,
+        queueFailures: summary.queueFailures,
+      }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown scheduled collection failure.";
-      console.error("Postdoc collection failed.", {
-        message: message.replace(/[\r\n\t]+/g, " ").slice(0, 300),
-      });
+      console.error(JSON.stringify({
+        event: "source_collection_schedule_failed",
+        error: message.replace(/[\r\n\t]+/g, " ").slice(0, 300),
+      }));
     }
+  },
+
+  async queue(batch, env, ctx) {
+    const results = await consumeSourceQueue(batch, env, ctx);
+    console.log(JSON.stringify({
+      event: "source_collection_batch_completed",
+      queue: batch.queue,
+      results: results.map((result) => ({
+        sourceKey: result.sourceKey,
+        status: result.status,
+      })),
+    }));
   },
 };
 

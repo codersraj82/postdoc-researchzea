@@ -25,6 +25,24 @@
 			"database_id": "5277602b-2646-483e-a42c-4f200597cc9a"
 		}
 	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "SOURCE_COLLECTION_QUEUE",
+				"queue": "postdoc-source-collection"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "postdoc-source-collection",
+				"max_batch_size": 1,
+				"max_batch_timeout": 5,
+				"max_retries": 3,
+				"dead_letter_queue": "postdoc-source-collection-dlq",
+				"max_concurrency": 2
+			}
+		]
+	},
 	"routes": [
 		{
 			"pattern": "postdoc.researchzeal.com",

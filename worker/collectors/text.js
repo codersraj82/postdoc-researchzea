@@ -95,6 +95,7 @@ export function canonicalizeUrl(value, baseUrl) {
   if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) {
     url.port = "";
   }
+  if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, "");
 
   return url.toString();
 }

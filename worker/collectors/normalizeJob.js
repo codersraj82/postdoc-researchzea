@@ -249,6 +249,8 @@ function normalizeTitle(value) {
 }
 
 export async function createSourceItemId(entry, sourceUrl) {
+  const registered = String(entry?.sourceItemId ?? "").trim();
+  if (registered) return registered.slice(0, 500);
   if (sourceUrl) return sourceUrl.slice(0, 500);
   const explicit = String(entry?.guid ?? "").trim();
   if (explicit) return explicit.slice(0, 500);
@@ -279,7 +281,7 @@ export async function normalizeJob(entry, source, now = new Date()) {
   const postedAt = isoDate(entry.pubDate, {
     now,
     futureToleranceMs: 48 * 60 * 60 * 1000,
-  });
+  }) || now.toISOString().slice(0, 10);
   const sourceItemId = await createSourceItemId(entry, sourceUrl);
   const explicitInstitution = normalizeInstitution(entry.institution);
   const titleInstitution = extractInstitution(title);
@@ -309,12 +311,19 @@ export async function normalizeJob(entry, source, now = new Date()) {
       || location.city,
     research_area: researchArea,
     language: source.defaultLanguage,
+    source_language: String(entry.sourceLanguage || source.defaultLanguageCode || "unknown")
+      .trim()
+      .toLowerCase()
+      .slice(0, 20),
+    original_title: title,
+    original_description: metadataText,
     description,
     apply_url: applyUrl,
     source_url: sourceUrl,
     deadline: isoDate(entry.deadline) || extractDeadline(combinedText, now),
     posted_at: postedAt,
-    employment_type: "Postdoctoral position",
+    employment_type: String(entry.employmentType ?? "").trim().slice(0, 100)
+      || "Postdoctoral position",
     duration: extractDuration(String(entry.duration ?? ""))
       || extractDuration(combinedText),
     tags: buildTags(entry.categories, combinedText, researchArea),
@@ -324,13 +333,14 @@ export async function normalizeJob(entry, source, now = new Date()) {
     source_key: source.key,
     source_name: source.name,
     source_item_id: sourceItemId,
-    source_type: entry.sourceType === "html" ? "html" : "rss",
+    source_type: entry.sourceType === "rss" ? "rss" : "html",
+    observation_source_type: source.type,
     canonical_url: sourceUrl,
     expiry_reason: null,
     first_seen_at: timestamp,
     last_seen_at: timestamp,
     last_verified_at: timestamp,
-    collection_state: "active",
+    collection_state: entry.closed ? "expired" : "active",
     created_at: timestamp,
     updated_at: timestamp,
   };
