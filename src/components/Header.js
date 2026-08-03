@@ -1,3 +1,5 @@
+import VisitorCounter from "@/components/VisitorCounter";
+
 export default function Header() {
   return (
     <header className="border-b border-white/8 bg-[#07111f]/85 backdrop-blur-md">
@@ -20,16 +22,17 @@ export default function Header() {
           </span>
         </a>
 
-        <nav className="flex items-center gap-2 text-sm" aria-label="Primary navigation">
+        <nav className="flex shrink-0 items-center gap-1.5 text-sm sm:gap-2" aria-label="Primary navigation">
           <a className="nav-link hidden sm:inline-flex" href="#positions">
             Browse positions
           </a>
           <a className="nav-link hidden md:inline-flex" href="#alerts">
             Weekly alerts
           </a>
-          <span className="rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1.5 text-[0.68rem] font-semibold text-emerald-200 sm:text-xs">
+          <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1.5 text-[0.68rem] font-semibold text-emerald-200 xl:inline-flex xl:text-xs">
             No signup required
           </span>
+          <VisitorCounter />
         </nav>
       </div>
     </header>

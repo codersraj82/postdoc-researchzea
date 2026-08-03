@@ -1,3 +1,5 @@
+import { matchesSourceLanguage } from "./languages.js";
+
 function normalize(value) {
   return String(value ?? "").trim().toLocaleLowerCase();
 }
@@ -54,6 +56,10 @@ export function filterJobs(jobs, filters = {}, now = new Date()) {
       (job) => !researchArea || normalize(job.research_area) === researchArea,
     )
     .filter((job) => !language || normalize(job.language) === language)
+    .filter(
+      (job) => !filters.sourceLanguage
+        || matchesSourceLanguage(job, filters.sourceLanguage),
+    )
     .filter((job) => {
       if (!deadline) return true;
       if (deadline === "no-deadline") return !job.deadline;
