@@ -65,8 +65,11 @@ function SelectField({ id, label, value, onChange, options, allLabel }) {
         <select id={id} className="form-control form-select" value={value} onChange={onChange}>
           <option value="">{allLabel}</option>
           {options.map((option) => (
-            <option key={option} value={option}>
-              {option}
+            <option
+              key={typeof option === "string" ? option : option.value}
+              value={typeof option === "string" ? option : option.value}
+            >
+              {typeof option === "string" ? option : option.label}
             </option>
           ))}
         </select>
@@ -90,6 +93,9 @@ export default function SearchFilters({
   onSubmit,
   sourceStatus,
   onRetryDatabase,
+  savedOnly,
+  onSavedOnlyChange,
+  savedCount,
 }) {
   return (
     <form onSubmit={onSubmit} aria-label="Search Postdoc positions">
@@ -126,7 +132,7 @@ export default function SearchFilters({
         </p>
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <SelectField
           id="country"
           label="Country"
@@ -150,6 +156,14 @@ export default function SearchFilters({
           onChange={(event) => onFilterChange("language", event.target.value)}
           options={options.languages}
           allLabel="All languages"
+        />
+        <SelectField
+          id="source-language"
+          label="Source language"
+          value={filters.sourceLanguage}
+          onChange={(event) => onFilterChange("sourceLanguage", event.target.value)}
+          options={options.sourceLanguages}
+          allLabel="All source languages"
         />
         <div>
           <label htmlFor="deadline" className="form-label">
@@ -181,9 +195,20 @@ export default function SearchFilters({
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-5">
         <SourceStatus status={sourceStatus} onRetryDatabase={onRetryDatabase} />
-        <button type="button" onClick={onClear} className="secondary-button min-h-10">
-          Clear filters
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-3 text-xs font-semibold text-slate-300">
+            <input
+              type="checkbox"
+              checked={savedOnly}
+              onChange={(event) => onSavedOnlyChange(event.target.checked)}
+              className="size-4 accent-cyan-300"
+            />
+            Saved positions ({savedCount})
+          </label>
+          <button type="button" onClick={onClear} className="secondary-button min-h-10">
+            Clear filters
+          </button>
+        </div>
       </div>
     </form>
   );

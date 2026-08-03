@@ -1,7 +1,16 @@
 import EmptyResults from "@/components/EmptyResults";
 import JobCard from "@/components/JobCard";
 
-export default function JobResults({ jobs, referenceDate, onClear }) {
+export default function JobResults({
+  jobs,
+  referenceDate,
+  onClear,
+  comparedIds,
+  savedIds,
+  onToggleCompare,
+  onToggleSaved,
+  preferenceMatches,
+}) {
   const countLabel = `${jobs.length} ${jobs.length === 1 ? "position" : "positions"} found`;
 
   return (
@@ -20,7 +29,18 @@ export default function JobResults({ jobs, referenceDate, onClear }) {
 
       <div className="mt-5 space-y-4">
         {jobs.length ? (
-          jobs.map((job) => <JobCard key={job.id} job={job} referenceDate={referenceDate} />)
+          jobs.map((job) => (
+            <JobCard
+              key={job.id}
+              job={job}
+              referenceDate={referenceDate}
+              isCompared={comparedIds.includes(job.id)}
+              isSaved={savedIds.includes(job.id)}
+              onToggleCompare={onToggleCompare}
+              onToggleSaved={onToggleSaved}
+              preferenceMatch={preferenceMatches.get(job.id)}
+            />
+          ))
         ) : (
           <EmptyResults onClear={onClear} />
         )}

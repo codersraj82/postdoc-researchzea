@@ -5,6 +5,8 @@ import {
   publicDatasetCondition,
 } from "./collectors/publicJobs.js";
 import { scheduleDueSources } from "./collectors/scheduleSources.js";
+import { getSourceDefinition } from "./collectors/sourceRegistry.js";
+import { handleVisitRequest } from "./visitors.js";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8",
@@ -73,6 +75,7 @@ function parseTags(value) {
 }
 
 function mapJobRow(row) {
+  const source = getSourceDefinition(row.source_key);
   return {
     id: row.id,
     title: row.title,
@@ -82,6 +85,8 @@ function mapJobRow(row) {
     research_area: row.research_area,
     language: row.language,
     source_language: row.source_language ?? "unknown",
+    source_name: row.source_name ?? source?.name ?? null,
+    official_source: source?.institutionOwned === true,
     source_count: Number(row.source_count ?? 1),
     last_verified_at: row.last_verified_at ?? null,
     description: row.description,
@@ -242,7 +247,7 @@ async function handleJobs(url, env) {
         id, title, institution, country, city, research_area, language,
         description, apply_url, source_url, deadline, posted_at,
         created_at, updated_at, employment_type, duration, tags_json, is_demo,
-        source_language, last_verified_at,
+        source_language, source_key, source_name, last_verified_at,
         (SELECT COUNT(*) FROM job_sources js
          WHERE js.job_id = jobs.id AND js.observation_state = 'active') AS source_count
       FROM jobs
@@ -292,12 +297,20 @@ const worker = {
         return env.ASSETS.fetch(request);
       }
 
-      if (pathname !== "/api/health" && pathname !== "/api/jobs") {
+      if (
+        pathname !== "/api/health"
+        && pathname !== "/api/jobs"
+        && pathname !== "/api/visit"
+      ) {
         return errorResponse(
           404,
           "NOT_FOUND",
           "The requested API endpoint was not found.",
         );
+      }
+
+      if (pathname === "/api/visit") {
+        return handleVisitRequest(request, env);
       }
 
       if (request.method === "OPTIONS") {

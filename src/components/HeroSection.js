@@ -24,7 +24,7 @@ export default function HeroSection() {
         <div className="max-w-4xl">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/8 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-200">
             <span className="size-1.5 rounded-full bg-cyan-300" />
-            Phase 1 · Demonstration search
+            Worldwide postdoc search
           </div>
           <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.04] tracking-[-0.045em] text-white sm:text-5xl lg:text-6xl">
             Find Recent Postdoc Positions Worldwide

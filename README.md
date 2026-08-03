@@ -8,7 +8,7 @@ Postdoc ResearchZeal is a focused, no-signup search interface for discovering Po
 
 ## Current phase
 
-Phase 7B-A: Static no-signup Postdoc search UI with D1 API loading, automatic local-data fallback, and queue-based collection from four reviewed research sources.
+Phase 8A: No-signup Postdoc search with D1 API loading, automatic local-data fallback, queue-based collection from four reviewed sources, local comparison/shortlisting, transparent preference matching, and an anonymous visitor counter.
 
 The homepage loads active real D1 jobs when available and automatically keeps the bundled demonstration jobs when the API is unavailable. D1 demonstrations are shown only when there are no active real collected jobs.
 
@@ -54,6 +54,11 @@ Do not add Cloudflare credentials to this repository. The Worker configuration p
 
 - Search jobs across titles, institutions, places, descriptions, areas, and tags
 - Filter jobs by country, research area, language, and deadline
+- Filter by the original source language using human-readable language names
+- Compare up to three real positions without AI or an account
+- Save a device-local shortlist containing job IDs only
+- Calculate optional, deterministic preference matches with visible reasons
+- Show approximate unique-browser and daily visitor counts without storing IP addresses or fingerprints
 - Load up to 100 jobs from the same-origin D1 API
 - Fall back automatically to bundled sample jobs when the API is unavailable or invalid
 - Retry the database from the compact source-status control
@@ -414,3 +419,31 @@ The live test is deliberately separate from deterministic tests. It performs one
 6. Observe the first scheduled fan-out and confirm each source run, source health state, job observation, public API result, search/filter behavior, and external links.
 
 Migration 0004 and both queues are prerequisites for the Phase 7B-A Worker. This implementation does not create remote queues, apply the remote migration, deploy, trigger production collection, or modify production D1.
+
+## Phase 8A - Private local comparison and visitor counts
+
+Phase 8A adds a no-AI comparison sheet for up to three active real positions, a local shortlist, and optional rule-based preference matching. Comparison and shortlist storage contain job IDs only. Preferences are also stored only in the current browser. None of these values are written to D1 or synchronized between devices, and missing or expired IDs are removed after a valid live API result is loaded.
+
+Preference matching uses normalized literal tokens and an explicit 100-point model: research terms up to 40; country/source-language preferences up to 20; deadline preference up to 15; direct application and official institution-owned source up to 15; and stated comparison details up to 10. Every awarded reason is visible. This is not AI, uses no embeddings or external service, and does not claim that the highest score is objectively best.
+
+Listings remain in their original source language. The English interface supplies human-readable language labels and a source-language filter, but it performs no automatic translation and incurs no AI or translation-service cost.
+
+### Anonymous visitor counter
+
+`POST /api/visit` sets a random, opaque `rz_visitor_id` cookie for about one year and an `rz_visit_day` marker bounded to the current UTC day. Both cookies are `HttpOnly`, `Secure`, `SameSite=Lax`, and scoped to `/`. The Worker stores only a SHA-256 hash of the random identifier in `site_visitors` and one hash/date pair in `site_visitor_days`; it does not read or store an IP address, `CF-Connecting-IP`, geolocation, user agent, fingerprint, advertising identifier, email, or account data.
+
+Counts represent approximate unique browsers, not people or accounting-grade traffic. Cookie clearing, blocked cookies, multiple browsers, and deliberate requests can affect them. The endpoint accepts only bodyless same-origin `POST` requests, uses parameterized D1 statements, and returns a safe unavailable response if counting fails.
+
+Migration `0005_visitor_counter.sql` is additive and creates the two visitor tables plus the date index. It seeds no visitors and does not modify jobs, job observations, source runs, Queue state, collection history, or collector health.
+
+### Production order
+
+After local review, the recommended production order is:
+
+1. Review the Phase 8A UI, privacy model, Worker endpoint, migration, and tests.
+2. Apply migrations through the existing Wrangler migration tracker so `0005_visitor_counter.sql` runs once after migrations 0001-0004.
+3. Commit and push the reviewed branch through the normal Git workflow.
+4. Merge only after review, then allow the connected Cloudflare build to deploy.
+5. Verify `/api/visit`, cookie attributes, visitor counts, comparison, shortlist, preferences, source-language filtering, and mobile layout.
+
+No Queue, Cron, domain, secret, or collector change is required for Phase 8A.

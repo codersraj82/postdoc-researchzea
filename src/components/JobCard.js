@@ -5,6 +5,7 @@ import {
   formatJobLocation,
   isDemonstrationJob,
 } from "@/lib/jobPresentation";
+import { getLanguageLabel } from "@/lib/languages";
 
 function ExternalLinkIcon() {
   return (
@@ -15,7 +16,15 @@ function ExternalLinkIcon() {
   );
 }
 
-export default function JobCard({ job, referenceDate }) {
+export default function JobCard({
+  job,
+  referenceDate,
+  isCompared,
+  isSaved,
+  onToggleCompare,
+  onToggleSaved,
+  preferenceMatch,
+}) {
   const closingSoon = isClosingSoon(job, new Date(referenceDate));
   const location = formatJobLocation(job);
   const isDemo = isDemonstrationJob(job);
@@ -41,6 +50,9 @@ export default function JobCard({ job, referenceDate }) {
           </h3>
           <p className="mt-2 font-medium text-slate-300">{job.institution}</p>
           {location && <p className="mt-1 text-sm text-slate-400">{location}</p>}
+          <p className="mt-1 text-xs text-slate-500">
+            Source language: {getLanguageLabel(job.source_language)}
+          </p>
         </div>
 
         <div className="grid shrink-0 grid-cols-2 gap-3 lg:min-w-52 lg:grid-cols-1">
@@ -76,13 +88,46 @@ export default function JobCard({ job, referenceDate }) {
         ))}
       </div>
 
+      {preferenceMatch && (
+        <details className="mt-5 rounded-lg border border-cyan-300/15 bg-cyan-300/[0.045] px-3 py-2.5">
+          <summary className="cursor-pointer text-sm font-semibold text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300">
+            Preference match: {preferenceMatch.score}/100
+          </summary>
+          <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-300">
+            {preferenceMatch.reasons.length ? preferenceMatch.reasons.map((reason) => (
+              <li key={reason}>- {reason}</li>
+            )) : <li>No selected preference earned points for this listing.</li>}
+          </ul>
+        </details>
+      )}
+
       <div className="mt-6 flex flex-col gap-4 border-t border-white/8 pt-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-400">
           {job.employment_type && <span>{job.employment_type}</span>}
           {job.duration && <span>{job.duration}</span>}
           {isDemo && <span>Demonstration listing</span>}
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          {!isDemo && (
+            <>
+              <button
+                type="button"
+                className="secondary-button min-h-11"
+                onClick={() => onToggleSaved(job.id)}
+                aria-pressed={isSaved}
+              >
+                {isSaved ? "Saved" : "Save"}
+              </button>
+              <button
+                type="button"
+                className="secondary-button min-h-11"
+                onClick={() => onToggleCompare(job.id)}
+                aria-pressed={isCompared}
+              >
+                {isCompared ? "Remove from compare" : "Compare"}
+              </button>
+            </>
+          )}
           {job.source_url && !hasSingleApplicationDestination && (
             <a
               href={job.source_url}
