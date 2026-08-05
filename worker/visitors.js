@@ -64,6 +64,10 @@ function cookie(name, value, maximumAge) {
   return `${name}=${value}; Max-Age=${maximumAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
 
+export function createVisitorIdCookie(visitorId) {
+  return cookie(VISITOR_COOKIE, visitorId, VISITOR_MAX_AGE_SECONDS);
+}
+
 function isSameOrigin(request) {
   const origin = request.headers.get("Origin");
   if (!origin) return true;

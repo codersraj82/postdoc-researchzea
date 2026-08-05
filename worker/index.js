@@ -1,11 +1,13 @@
 import { consumeSourceQueue } from "./collectors/consumeSourceQueue.js";
-import {
-  hasActiveCollectedJobs,
-  normalizeDemoFlag,
-  publicDatasetCondition,
-} from "./collectors/publicJobs.js";
 import { scheduleDueSources } from "./collectors/scheduleSources.js";
-import { getSourceDefinition } from "./collectors/sourceRegistry.js";
+import { filtersFromSearchParams, searchPublicJobs } from "./jobSearch.js";
+import {
+  cleanupSourceSearchData,
+  handleSourceSearchPost,
+  handleSourceSearchStatus,
+  recoverStaleSourceSearchRequests,
+  sourceSearchError,
+} from "./sourceSearch.js";
 import { handleVisitRequest } from "./visitors.js";
 
 const JSON_HEADERS = {
@@ -14,18 +16,10 @@ const JSON_HEADERS = {
   "X-Content-Type-Options": "nosniff",
 };
 
-const INPUT_LIMITS = {
-  keyword: 150,
-  country: 100,
-  researchArea: 150,
-  language: 100,
-};
-
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 const DEFAULT_OFFSET = 0;
 const MAX_OFFSET = 10000;
-const DEADLINE_OPTIONS = new Set(["any", "7", "30", "60", "open", "none"]);
 
 function jsonResponse(payload, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(payload), {
@@ -48,10 +42,6 @@ function errorResponse(status, code, message, extraHeaders = {}) {
   );
 }
 
-function normalizeInput(value, maximumLength) {
-  return String(value ?? "").trim().slice(0, maximumLength);
-}
-
 function parseInteger(value, fallback, minimum, maximum) {
   if (value === null || !/^\d+$/.test(value.trim())) {
     return fallback;
@@ -63,124 +53,6 @@ function parseInteger(value, fallback, minimum, maximum) {
   }
 
   return Math.min(Math.max(parsed, minimum), maximum);
-}
-
-function parseTags(value) {
-  try {
-    const tags = JSON.parse(value);
-    return Array.isArray(tags) ? tags : [];
-  } catch {
-    return [];
-  }
-}
-
-function mapJobRow(row) {
-  const source = getSourceDefinition(row.source_key);
-  return {
-    id: row.id,
-    title: row.title,
-    institution: row.institution,
-    country: row.country,
-    city: row.city,
-    research_area: row.research_area,
-    language: row.language,
-    source_language: row.source_language ?? "unknown",
-    source_name: row.source_name ?? source?.name ?? null,
-    official_source: source?.institutionOwned === true,
-    source_count: Number(row.source_count ?? 1),
-    last_verified_at: row.last_verified_at ?? null,
-    description: row.description,
-    apply_url: row.apply_url,
-    source_url: row.source_url,
-    deadline: row.deadline,
-    posted_at: row.posted_at,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    employment_type: row.employment_type,
-    duration: row.duration,
-    tags: parseTags(row.tags_json),
-    is_demo: normalizeDemoFlag(row.is_demo),
-  };
-}
-
-function escapeLikePattern(value) {
-  return value.replace(/[\\%_]/g, "\\$&");
-}
-
-function getFilters(searchParams) {
-  const keywordValue = searchParams.has("keyword")
-    ? searchParams.get("keyword")
-    : searchParams.get("q");
-  const deadlineValue = normalizeInput(searchParams.get("deadline"), 20).toLowerCase();
-
-  return {
-    keyword: normalizeInput(keywordValue, INPUT_LIMITS.keyword),
-    country: normalizeInput(searchParams.get("country"), INPUT_LIMITS.country),
-    research_area: normalizeInput(
-      searchParams.get("research_area"),
-      INPUT_LIMITS.researchArea,
-    ),
-    language: normalizeInput(searchParams.get("language"), INPUT_LIMITS.language),
-    deadline: DEADLINE_OPTIONS.has(deadlineValue) ? deadlineValue : "any",
-  };
-}
-
-function buildJobFilters(filters, datasetCondition) {
-  const conditions = [
-    "is_active = 1",
-    datasetCondition,
-    "(deadline IS NULL OR date(deadline) >= date('now'))",
-  ];
-  const values = [];
-
-  if (filters.keyword) {
-    const keyword = `%${escapeLikePattern(filters.keyword.toLowerCase())}%`;
-    const searchableColumns = [
-      "title",
-      "institution",
-      "country",
-      "city",
-      "research_area",
-      "language",
-      "description",
-      "tags_json",
-    ];
-    conditions.push(
-      `(${searchableColumns.map((column) => `LOWER(COALESCE(${column}, '')) LIKE ? ESCAPE '\\'`).join(" OR ")})`,
-    );
-    values.push(...searchableColumns.map(() => keyword));
-  }
-
-  if (filters.country) {
-    conditions.push("LOWER(TRIM(country)) = ?");
-    values.push(filters.country.toLowerCase());
-  }
-
-  if (filters.research_area) {
-    conditions.push("LOWER(TRIM(research_area)) = ?");
-    values.push(filters.research_area.toLowerCase());
-  }
-
-  if (filters.language) {
-    conditions.push("LOWER(language) LIKE ? ESCAPE '\\'");
-    values.push(`%${escapeLikePattern(filters.language.toLowerCase())}%`);
-  }
-
-  if (["7", "30", "60"].includes(filters.deadline)) {
-    conditions.push(
-      "deadline IS NOT NULL AND date(deadline) BETWEEN date('now') AND date('now', ?)",
-    );
-    values.push(`+${filters.deadline} days`);
-  } else if (filters.deadline === "open") {
-    conditions.push("deadline IS NOT NULL AND date(deadline) >= date('now')");
-  } else if (filters.deadline === "none") {
-    conditions.push("deadline IS NULL");
-  }
-
-  return {
-    whereClause: `WHERE ${conditions.join(" AND ")}`,
-    values,
-  };
 }
 
 function methodNotAllowed() {
@@ -227,7 +99,7 @@ async function handleHealth(env) {
 }
 
 async function handleJobs(url, env) {
-  const filters = getFilters(url.searchParams);
+  const filters = filtersFromSearchParams(url.searchParams);
   const limit = parseInteger(url.searchParams.get("limit"), DEFAULT_LIMIT, 1, MAX_LIMIT);
   const offset = parseInteger(
     url.searchParams.get("offset"),
@@ -237,44 +109,18 @@ async function handleJobs(url, env) {
   );
 
   try {
-    const useCollectedJobs = await hasActiveCollectedJobs(env.DB);
-    const { whereClause, values } = buildJobFilters(
-      filters,
-      publicDatasetCondition(useCollectedJobs),
-    );
-    const jobsQuery = `
-      SELECT
-        id, title, institution, country, city, research_area, language,
-        description, apply_url, source_url, deadline, posted_at,
-        created_at, updated_at, employment_type, duration, tags_json, is_demo,
-        source_language, source_key, source_name, last_verified_at,
-        (SELECT COUNT(*) FROM job_sources js
-         WHERE js.job_id = jobs.id AND js.observation_state = 'active') AS source_count
-      FROM jobs
-      ${whereClause}
-      ORDER BY posted_at DESC, created_at DESC
-      LIMIT ? OFFSET ?
-    `;
-    const countQuery = `SELECT COUNT(*) AS total FROM jobs ${whereClause}`;
-    const jobsStatement = env.DB.prepare(jobsQuery).bind(...values, limit, offset);
-    const countStatement = env.DB.prepare(countQuery).bind(...values);
-    const [jobsResult, countResult] = await env.DB.batch([
-      jobsStatement,
-      countStatement,
-    ]);
-    const jobs = (jobsResult.results ?? []).map(mapJobRow);
-    const total = Number(countResult.results?.[0]?.total ?? 0);
+    const result = await searchPublicJobs(env.DB, filters, { limit, offset });
 
     return jsonResponse({
       ok: true,
       source: "d1",
-      count: jobs.length,
-      total,
+      count: result.jobs.length,
+      total: result.total,
       limit,
       offset,
-      has_more: offset + jobs.length < total,
-      filters,
-      jobs,
+      has_more: result.hasMore,
+      filters: result.filters,
+      jobs: result.jobs,
     });
   } catch (error) {
     console.error("D1 jobs query failed.", error);
@@ -292,9 +138,34 @@ const worker = {
       const url = new URL(request.url);
       const pathname = url.pathname.replace(/\/+$/, "") || "/";
       const isApiRequest = pathname === "/api" || pathname.startsWith("/api/");
+      const sourceSearchMatch = pathname.match(/^\/api\/source-search\/([^/]+)$/);
 
       if (!isApiRequest) {
         return env.ASSETS.fetch(request);
+      }
+
+      if (pathname === "/api/source-search") {
+        if (request.method !== "POST") {
+          return sourceSearchError(
+            405,
+            "METHOD_NOT_ALLOWED",
+            "Only POST requests are supported for this endpoint.",
+            { headers: { Allow: "POST" } },
+          );
+        }
+        return handleSourceSearchPost(request, env);
+      }
+
+      if (sourceSearchMatch) {
+        if (request.method !== "GET") {
+          return sourceSearchError(
+            405,
+            "METHOD_NOT_ALLOWED",
+            "Only GET requests are supported for this endpoint.",
+            { headers: { Allow: "GET" } },
+          );
+        }
+        return handleSourceSearchStatus(sourceSearchMatch[1], env);
       }
 
       if (
@@ -338,9 +209,31 @@ const worker = {
 
   async scheduled(controller, env, ctx) {
     void ctx;
+    const scheduledAt = new Date(controller.scheduledTime);
+    try {
+      const recovery = await recoverStaleSourceSearchRequests(env.DB, scheduledAt);
+      console.log(JSON.stringify({ event: "source_search_recovery", ...recovery }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "source_search_recovery_failed",
+        error: error instanceof Error ? error.name : "UnknownError",
+      }));
+    }
+    try {
+      const cleanup = await cleanupSourceSearchData(
+        env.DB,
+        scheduledAt,
+      );
+      console.log(JSON.stringify({ event: "source_search_cleanup", ...cleanup }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "source_search_cleanup_failed",
+        error: error instanceof Error ? error.name : "UnknownError",
+      }));
+    }
     try {
       const summary = await scheduleDueSources(env, controller, {
-        now: new Date(controller.scheduledTime),
+        now: scheduledAt,
       });
       console.log(JSON.stringify({
         event: "source_collection_scheduled",

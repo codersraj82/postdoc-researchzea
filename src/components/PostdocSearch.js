@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import ApprovedSourceSearch from "@/components/ApprovedSourceSearch";
 import ComparisonSheet from "@/components/ComparisonSheet";
 import ComparisonTray from "@/components/ComparisonTray";
 import JobResults from "@/components/JobResults";
@@ -21,6 +22,7 @@ import {
   EMPTY_PREFERENCES,
   normalizePreferences,
 } from "@/lib/preferenceMatch";
+import { shouldOfferApprovedSourceSearch } from "@/lib/approvedSourceSearch";
 
 const COMPARE_STORAGE_KEY = "rz_compare_job_ids_v1";
 const SAVED_STORAGE_KEY = "rz_saved_job_ids_v1";
@@ -140,10 +142,10 @@ export default function PostdocSearch({ jobs, referenceDate }) {
     setSavedOnly(false);
   }
 
-  function retryDatabase() {
+  const retryDatabase = useCallback(() => {
     setJobData((current) => ({ ...current, source: "loading" }));
     setRetryRequest((current) => current + 1);
-  }
+  }, []);
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -223,6 +225,16 @@ export default function PostdocSearch({ jobs, referenceDate }) {
             onToggleCompare={toggleComparison}
             onToggleSaved={toggleSaved}
             preferenceMatches={preferenceMatches}
+          />
+          <ApprovedSourceSearch
+            filters={filters}
+            visible={shouldOfferApprovedSourceSearch({
+              dataSource: jobData.source,
+              resultCount: filteredJobs.length,
+              savedOnly,
+              filters,
+            })}
+            onRefreshJobs={retryDatabase}
           />
         </div>
       </div>

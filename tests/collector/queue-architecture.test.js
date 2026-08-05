@@ -11,6 +11,7 @@ import {
   sourceRunFailureStatus,
 } from "../../worker/collectors/consumeSourceQueue.js";
 import {
+  createOnDemandSourceQueueMessage,
   createSourceQueueMessage,
   validateSourceQueueMessage,
 } from "../../worker/collectors/queueMessage.js";
@@ -97,10 +98,12 @@ function schedulerDb(states = []) {
   };
 }
 
-function consumerDb(runs) {
+function consumerDb(runs, searches = []) {
   const sourceRuns = new Map(runs.map((run) => [run.message_id, { ...run }]));
+  const searchRequests = new Map(searches.map((request) => [request.id, { ...request }]));
   return {
     sourceRuns,
+    searchRequests,
     prepare(sql) {
       return {
         bind(...values) {
@@ -108,6 +111,13 @@ function consumerDb(runs) {
             async first() {
               if (sql.includes("SELECT * FROM source_runs")) return sourceRuns.get(values[0]) ?? null;
               if (sql.includes("FROM collector_sources")) return null;
+              if (sql.includes("FROM source_search_requests") && sql.includes("WHERE id = ?")) {
+                return searchRequests.get(values[0]) ?? null;
+              }
+              if (sql.includes("FROM source_search_requests") && sql.includes("collection_run_id = ?")) {
+                return [...searchRequests.values()].find((request) =>
+                  request.collection_run_id === values[0]) ?? null;
+              }
               return null;
             },
             async all() { return { results: [] }; },
@@ -115,6 +125,14 @@ function consumerDb(runs) {
               if (sql.includes("UPDATE source_runs SET status = 'running'")) {
                 const run = sourceRuns.get(values.at(-1));
                 if (run) run.status = "running";
+              } else if (sql.includes("UPDATE source_runs SET status = 'skipped'")) {
+                const run = sourceRuns.get(values.at(-1));
+                if (run && ["queued", "running"].includes(run.status)) {
+                  run.status = "skipped";
+                  run.mode_used = values[1];
+                  run.error_code = values[2];
+                  run.finished_at = values[0];
+                }
               } else if (sql.includes("UPDATE source_runs SET") && sql.includes("status = ?")) {
                 const run = sourceRuns.get(values.at(-1));
                 if (run) run.status = values[0];
@@ -218,6 +236,38 @@ test("queue message contract accepts only controlled identifiers", () => {
   assert.equal(validateSourceQueueMessage({ ...created, sourceKey: "unknown" }, () => null).valid, false);
 });
 
+test("version-2 on-demand messages contain only approved identifiers and preserve version 1", () => {
+  let index = 0;
+  const scheduled = createSourceQueueMessage({
+    runId: uuids[0], sourceKey: "fixture-source", scheduledAt: now,
+    uuid: () => uuids[++index],
+  });
+  assert.equal(scheduled.version, 1);
+  assert.equal(validateSourceQueueMessage(scheduled, () => source()).valid, true);
+
+  index = 0;
+  const onDemand = createOnDemandSourceQueueMessage({
+    runId: uuids[0],
+    sourceKey: "fixture-source",
+    searchRequestId: uuids[4],
+    scheduledAt: now,
+    uuid: () => uuids[++index],
+  });
+  assert.equal(onDemand.version, 2);
+  assert.deepEqual(onDemand.attemptContext, {
+    reason: "on_demand",
+    searchRequestId: uuids[4],
+  });
+  assert.equal(JSON.stringify(onDemand).includes("keyword"), false);
+  assert.equal(JSON.stringify(onDemand).includes("http"), false);
+  assert.equal(validateSourceQueueMessage(onDemand, () => source()).valid, true);
+  assert.equal(validateSourceQueueMessage({
+    ...onDemand,
+    attemptContext: { ...onDemand.attemptContext, keyword: "quantum" },
+  }, () => source()).valid, false);
+  assert.equal(validateSourceQueueMessage({ ...onDemand, sourceKey: "disabled" }, () => source("disabled", { enabled: false })).valid, false);
+});
+
 test("scheduled producer sends one message only for each due enabled source", async () => {
   const due = source("due-source");
   const recent = source("recent-source");
@@ -267,6 +317,7 @@ test("successful consumption is idempotent across duplicate delivery and restart
   const db = consumerDb([{
     message_id: body.messageId,
     collection_run_id: body.runId,
+    source_key: body.sourceKey,
     status: "queued",
   }]);
   const repository = memoryRepository();
@@ -297,11 +348,175 @@ test("successful consumption is idempotent across duplicate delivery and restart
   db.sourceRuns.set(restartedBody.messageId, {
     message_id: restartedBody.messageId,
     collection_run_id: restartedBody.runId,
+    source_key: restartedBody.sourceKey,
     status: "running",
   });
   await processSourceQueueMessage(message(restartedBody, 2), { DB: db }, options);
   assert.equal(repository.calls.insert, 1);
   assert.equal(repository.calls.touch, 1);
+});
+
+test("on-demand consumption validates the linked search, stays idempotent, and finalizes it", async () => {
+  const definition = source();
+  const body = createOnDemandSourceQueueMessage({
+    runId: uuids[0],
+    sourceKey: definition.key,
+    searchRequestId: uuids[4],
+    scheduledAt: now,
+    uuid: () => uuids[1],
+  });
+  const db = consumerDb([{
+    message_id: body.messageId,
+    collection_run_id: body.runId,
+    source_key: body.sourceKey,
+    status: "queued",
+  }], [{
+    id: body.attemptContext.searchRequestId,
+    collection_run_id: body.runId,
+    status: "queued",
+  }]);
+  const repository = memoryRepository();
+  let collections = 0;
+  let searches = 0;
+  let runningMarks = 0;
+  const adapter = {
+    async collectSourceEntries() {
+      return {
+        entries: [{ title: "Fictional Postdoctoral Fellow", descriptionHtml: "Postdoctoral vacancy." }],
+        mode: "fixture",
+        stats: {},
+      };
+    },
+    async normalizeSourceEntry() { return normalizedJob(); },
+    validateSourceEntry() { return { valid: true, errors: [] }; },
+  };
+  const options = {
+    now,
+    repository,
+    getSourceDefinition: () => definition,
+    getSourceAdapter: () => adapter,
+    getSourcePriority: () => 10,
+    sourceRefreshDisposition: () => ({ eligible: true }),
+    markSourceSearchRunning: async () => { runningMarks += 1; },
+    expireCollectedJobs: async () => ({ stale: 0, expired: 0 }),
+    finalizeCollectionRun: async () => { collections += 1; },
+    finalizeSourceSearchRequest: async () => { searches += 1; },
+  };
+  const first = message(body);
+  assert.equal((await processSourceQueueMessage(first, { DB: db }, options)).status, "success");
+  assert.equal(first.calls.ack, 1);
+  assert.equal(runningMarks, 1);
+  assert.equal(collections, 1);
+  assert.equal(searches, 1);
+
+  const duplicate = message(body, 2);
+  assert.equal((await processSourceQueueMessage(duplicate, { DB: db }, options)).status, "duplicate");
+  assert.equal(duplicate.calls.ack, 1);
+  assert.equal(repository.calls.insert, 1);
+  assert.equal(searches, 2);
+});
+
+test("on-demand delivery rechecks the source cooldown without crawling", async () => {
+  const definition = source();
+  const body = createOnDemandSourceQueueMessage({
+    runId: uuids[0],
+    sourceKey: definition.key,
+    searchRequestId: uuids[4],
+    scheduledAt: now,
+    uuid: () => uuids[1],
+  });
+  const db = consumerDb([{
+    message_id: body.messageId,
+    collection_run_id: body.runId,
+    source_key: body.sourceKey,
+    status: "queued",
+  }], [{
+    id: body.attemptContext.searchRequestId,
+    collection_run_id: body.runId,
+    status: "running",
+  }]);
+  let collected = 0;
+  let searches = 0;
+  const queuedMessage = message(body);
+  const result = await processSourceQueueMessage(queuedMessage, { DB: db }, {
+    now,
+    getSourceDefinition: () => definition,
+    getSourceAdapter: () => ({
+      async collectSourceEntries() { collected += 1; return { entries: [] }; },
+    }),
+    sourceRefreshDisposition: () => ({
+      eligible: false,
+      reliable: true,
+      mode: "recent-cache",
+      code: null,
+    }),
+    finalizeCollectionRun: async () => {},
+    finalizeSourceSearchRequest: async () => { searches += 1; },
+  });
+  assert.equal(result.status, "skipped");
+  assert.equal(collected, 0);
+  assert.equal(searches, 1);
+  assert.equal(queuedMessage.calls.ack, 1);
+});
+
+test("malformed messages terminate existing linked runs and searches idempotently", async () => {
+  const cases = [
+    {
+      name: "malformed v2 searchRequestId",
+      mutate: (body) => ({
+        ...body,
+        attemptContext: { reason: "on_demand", searchRequestId: "invalid" },
+      }),
+    },
+    { name: "unsupported version", mutate: (body) => ({ ...body, version: 99 }) },
+    { name: "invalid sourceKey", mutate: (body) => ({ ...body, sourceKey: "INVALID" }) },
+  ];
+  for (const [index, fixture] of cases.entries()) {
+    const definition = source();
+    const searchRequestId = `00000000-0000-4000-8000-00000000002${index}`;
+    const base = createOnDemandSourceQueueMessage({
+      runId: uuids[0],
+      sourceKey: definition.key,
+      searchRequestId,
+      scheduledAt: now,
+      uuid: () => uuids[index + 1],
+    });
+    const malformed = fixture.mutate(base);
+    const db = consumerDb([{
+      message_id: base.messageId,
+      collection_run_id: base.runId,
+      source_key: base.sourceKey,
+      status: "queued",
+    }], [{
+      id: searchRequestId,
+      collection_run_id: base.runId,
+      status: "running",
+    }]);
+    let collectionStatus = "running";
+    const options = {
+      now,
+      getSourceDefinition: (key) => key === definition.key ? definition : null,
+      finalizeCollectionRun: async () => { collectionStatus = "skipped"; },
+      finalizeSourceSearchRequest: async (_database, requestId) => {
+        const search = db.searchRequests.get(requestId);
+        if (search) search.status = "failed";
+      },
+    };
+    const first = message(malformed);
+    const firstResult = await processSourceQueueMessage(first, { DB: db }, options);
+    assert.equal(firstResult.status, "rejected", fixture.name);
+    assert.equal(first.calls.ack, 1, fixture.name);
+    assert.equal(db.sourceRuns.get(base.messageId).status, "skipped", fixture.name);
+    assert.equal(db.sourceRuns.get(base.messageId).error_code, "INVALID_MESSAGE", fixture.name);
+    assert.equal(collectionStatus, "skipped", fixture.name);
+    assert.equal(db.searchRequests.get(searchRequestId).status, "failed", fixture.name);
+
+    const duplicate = message(malformed, 2);
+    await processSourceQueueMessage(duplicate, { DB: db }, options);
+    assert.equal(duplicate.calls.ack, 1, fixture.name);
+    assert.equal(db.sourceRuns.get(base.messageId).status, "skipped", fixture.name);
+    assert.equal(db.searchRequests.get(searchRequestId).status, "failed", fixture.name);
+  }
 });
 
 test("temporary failures retry, permanent failures acknowledge, and one source does not block another", async () => {
@@ -310,8 +525,8 @@ test("temporary failures retry, permanent failures acknowledge, and one source d
   const temporaryBody = validBody(temporarySource.key, 0);
   const successfulBody = validBody(successfulSource.key, 1);
   const db = consumerDb([
-    { message_id: temporaryBody.messageId, collection_run_id: temporaryBody.runId, status: "queued" },
-    { message_id: successfulBody.messageId, collection_run_id: successfulBody.runId, status: "queued" },
+    { message_id: temporaryBody.messageId, collection_run_id: temporaryBody.runId, source_key: temporaryBody.sourceKey, status: "queued" },
+    { message_id: successfulBody.messageId, collection_run_id: successfulBody.runId, source_key: successfulBody.sourceKey, status: "queued" },
   ]);
   const repository = memoryRepository();
   const temporaryMessage = message(temporaryBody);
@@ -344,6 +559,7 @@ test("temporary failures retry, permanent failures acknowledge, and one source d
   db.sourceRuns.set(permanentBody.messageId, {
     message_id: permanentBody.messageId,
     collection_run_id: permanentBody.runId,
+    source_key: permanentBody.sourceKey,
     status: "queued",
   });
   const permanentMessage = message(permanentBody);
