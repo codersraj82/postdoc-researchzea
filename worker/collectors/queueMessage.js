@@ -29,18 +29,47 @@ export function createSourceQueueMessage({
   };
 }
 
+export function createOnDemandSourceQueueMessage({
+  runId,
+  sourceKey,
+  searchRequestId,
+  scheduledAt,
+  uuid = () => crypto.randomUUID(),
+}) {
+  return {
+    version: 2,
+    messageId: uuid(),
+    runId,
+    sourceKey,
+    scheduledAt: scheduledAt.toISOString(),
+    attemptContext: {
+      reason: "on_demand",
+      searchRequestId,
+    },
+  };
+}
+
 export function validateSourceQueueMessage(body, getSource) {
   const errors = [];
   if (!exactKeys(body, TOP_LEVEL_KEYS)) errors.push("message shape is invalid");
-  if (body?.version !== 1) errors.push("message version is unsupported");
+  if (![1, 2].includes(body?.version)) errors.push("message version is unsupported");
   if (!UUID.test(String(body?.messageId ?? ""))) errors.push("messageId is invalid");
   if (!UUID.test(String(body?.runId ?? ""))) errors.push("runId is invalid");
   if (!/^[a-z0-9][a-z0-9-]{2,79}$/.test(String(body?.sourceKey ?? ""))) {
     errors.push("sourceKey is invalid");
   }
   if (!validTimestamp(body?.scheduledAt)) errors.push("scheduledAt is invalid");
-  if (!exactKeys(body?.attemptContext, ["reason"]) || body?.attemptContext?.reason !== "scheduled") {
-    errors.push("attemptContext is invalid");
+  if (body?.version === 1) {
+    if (!exactKeys(body?.attemptContext, ["reason"])
+      || body?.attemptContext?.reason !== "scheduled") {
+      errors.push("attemptContext is invalid");
+    }
+  } else if (body?.version === 2) {
+    if (!exactKeys(body?.attemptContext, ["reason", "searchRequestId"])
+      || body?.attemptContext?.reason !== "on_demand"
+      || !UUID.test(String(body?.attemptContext?.searchRequestId ?? ""))) {
+      errors.push("attemptContext is invalid");
+    }
   }
   const source = errors.length ? null : getSource(body.sourceKey);
   if (!source) errors.push("sourceKey is not approved");

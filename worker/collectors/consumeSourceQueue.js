@@ -1,7 +1,7 @@
 import { classifyPostdoc } from "./classifyPostdoc.js";
 import { finalizeCollectionRun } from "./collectionRuns.js";
 import { expireCollectedJobs } from "./expireCollectedJobs.js";
-import { validateSourceQueueMessage } from "./queueMessage.js";
+import { looksLikeUuid, validateSourceQueueMessage } from "./queueMessage.js";
 import {
   getSourceAdapter,
   getSourceDefinition,
@@ -14,6 +14,11 @@ import {
   sanitizeSourceError,
 } from "./sourceHealth.js";
 import { createD1JobRepository, storeCollectedJobs } from "./storeCollectedJobs.js";
+import {
+  finalizeSourceSearchRequest,
+  markSourceSearchRunning,
+  sourceRefreshDisposition,
+} from "../sourceSearch.js";
 
 const MAX_DELIVERY_ATTEMPTS = 4;
 const PERMANENT_CODES = new Set([
@@ -79,12 +84,42 @@ async function recordRejectedMessage(db, message, validation, now) {
   ).run();
 }
 
-async function markSourceRunSkipped(db, run, code, summary, now) {
+async function markSourceRunSkipped(db, run, code, summary, now, mode = null) {
   await db.prepare(
     `UPDATE source_runs SET status = 'skipped', finished_at = ?,
-       error_code = ?, error_summary = ?, updated_at = ?
-     WHERE message_id = ? AND status NOT IN ('success', 'partial')`,
-  ).bind(now, code, summary.slice(0, 300), now, run.message_id).run();
+       mode_used = COALESCE(?, mode_used), error_code = ?, error_summary = ?, updated_at = ?
+     WHERE message_id = ? AND status IN ('queued', 'running')`,
+  ).bind(now, mode, code, summary.slice(0, 300), now, run.message_id).run();
+}
+
+async function linkedSearchRequest(db, requestId) {
+  if (!requestId) return null;
+  return db.prepare(
+    `SELECT id, collection_run_id, status
+     FROM source_search_requests WHERE id = ? LIMIT 1`,
+  ).bind(requestId).first();
+}
+
+async function searchRequestForRun(db, collectionRunId) {
+  if (!collectionRunId) return null;
+  return db.prepare(
+    `SELECT id, collection_run_id, status
+     FROM source_search_requests WHERE collection_run_id = ? LIMIT 1`,
+  ).bind(collectionRunId).first();
+}
+
+async function finalizeRuns(
+  db,
+  run,
+  searchRequestId,
+  nowDate,
+  finalizeCollection,
+  finalizeSearch,
+) {
+  await finalizeCollection(db, run.collection_run_id, nowDate);
+  if (searchRequestId) {
+    await finalizeSearch(db, searchRequestId, nowDate);
+  }
 }
 
 async function markRunning(db, messageId, attempts, now) {
@@ -140,10 +175,39 @@ async function processMessage(message, env, options = {}) {
   const resolveAdapter = options.getSourceAdapter ?? getSourceAdapter;
   const priorityFor = options.getSourcePriority ?? getSourcePriority;
   const finalize = options.finalizeCollectionRun ?? finalizeCollectionRun;
+  const finalizeSearch = options.finalizeSourceSearchRequest ?? finalizeSourceSearchRequest;
+  const markSearchRunning = options.markSourceSearchRunning ?? markSourceSearchRunning;
+  const refreshDisposition = options.sourceRefreshDisposition ?? sourceRefreshDisposition;
   const expire = options.expireCollectedJobs ?? expireCollectedJobs;
   const validation = validateSourceQueueMessage(message.body, resolveSource);
   if (!validation.valid) {
-    await recordRejectedMessage(env.DB, message, validation, now);
+    const recognizableMessageId = looksLikeUuid(message.body?.messageId)
+      ? message.body.messageId
+      : null;
+    const existingRun = recognizableMessageId
+      ? await sourceRun(env.DB, recognizableMessageId)
+      : null;
+    if (existingRun) {
+      await markSourceRunSkipped(
+        env.DB,
+        existingRun,
+        "INVALID_MESSAGE",
+        validation.errors.join("; "),
+        now,
+        "invalid-message",
+      );
+      const related = await searchRequestForRun(env.DB, existingRun.collection_run_id);
+      await finalizeRuns(
+        env.DB,
+        existingRun,
+        related?.id,
+        nowDate,
+        finalize,
+        finalizeSearch,
+      );
+    } else {
+      await recordRejectedMessage(env.DB, message, validation, now);
+    }
     message.ack();
     return { status: "rejected", sourceKey: null };
   }
@@ -151,7 +215,13 @@ async function processMessage(message, env, options = {}) {
   const source = validation.source;
   const adapter = resolveAdapter(source.key);
   const run = await sourceRun(env.DB, message.body.messageId);
-  if (!run || run.collection_run_id !== message.body.runId) {
+  const onDemand = message.body.version === 2;
+  const requestedSearchId = onDemand
+    ? message.body.attemptContext.searchRequestId
+    : null;
+  if (!run
+    || run.collection_run_id !== message.body.runId
+    || run.source_key !== source.key) {
     if (run) {
       await markSourceRunSkipped(
         env.DB,
@@ -160,7 +230,10 @@ async function processMessage(message, env, options = {}) {
         "Message runId does not match its queued source run.",
         now,
       );
-      await finalize(env.DB, run.collection_run_id, nowDate);
+      const related = onDemand
+        ? await searchRequestForRun(env.DB, run.collection_run_id)
+        : null;
+      await finalizeRuns(env.DB, run, related?.id, nowDate, finalize, finalizeSearch);
     } else {
       await recordRejectedMessage(
         env.DB,
@@ -172,20 +245,69 @@ async function processMessage(message, env, options = {}) {
     message.ack();
     return { status: "rejected", sourceKey: source.key };
   }
-  if (["success", "partial"].includes(run.status)) {
+  let searchRequest = null;
+  if (onDemand) {
+    searchRequest = await linkedSearchRequest(env.DB, requestedSearchId);
+    if (!searchRequest
+      || searchRequest.collection_run_id !== run.collection_run_id
+      || !["queued", "running"].includes(searchRequest.status)) {
+      await markSourceRunSkipped(
+        env.DB,
+        run,
+        "INVALID_SEARCH_REQUEST",
+        "On-demand message is not linked to an active approved-source search.",
+        now,
+      );
+      const related = await searchRequestForRun(env.DB, run.collection_run_id);
+      await finalizeRuns(env.DB, run, related?.id, nowDate, finalize, finalizeSearch);
+      message.ack();
+      return { status: "rejected", sourceKey: source.key };
+    }
+  }
+  if (["success", "partial", "failed", "skipped", "dead_lettered"].includes(run.status)) {
+    if (onDemand) {
+      await finalizeRuns(env.DB, run, requestedSearchId, nowDate, finalize, finalizeSearch);
+    }
     message.ack();
     return { status: "duplicate", sourceKey: source.key };
   }
 
   const attempts = Math.max(1, Number(message.attempts ?? 1));
   const state = await sourceState(env.DB, source.key);
-  if (run.status === "queued" && !isSourceDue(source, state, new Date(message.body.scheduledAt))) {
-    await markSourceRunSkipped(env.DB, run, "SOURCE_NOT_DUE", "Source is no longer due.", now);
-    await finalize(env.DB, run.collection_run_id, nowDate);
-    message.ack();
-    return { status: "skipped", sourceKey: source.key };
+  if (run.status === "queued") {
+    if (onDemand) {
+      const disposition = refreshDisposition(state, nowDate);
+      if (!disposition.eligible) {
+        await markSourceRunSkipped(
+          env.DB,
+          run,
+          disposition.code,
+          disposition.reliable
+            ? "Source was refreshed successfully within the approved cooldown."
+            : "Source refresh remains deferred by its approved health policy.",
+          now,
+          disposition.mode,
+        );
+        await finalizeRuns(
+          env.DB,
+          run,
+          requestedSearchId,
+          nowDate,
+          finalize,
+          finalizeSearch,
+        );
+        message.ack();
+        return { status: "skipped", sourceKey: source.key };
+      }
+    } else if (!isSourceDue(source, state, new Date(message.body.scheduledAt))) {
+      await markSourceRunSkipped(env.DB, run, "SOURCE_NOT_DUE", "Source is no longer due.", now);
+      await finalize(env.DB, run.collection_run_id, nowDate);
+      message.ack();
+      return { status: "skipped", sourceKey: source.key };
+    }
   }
 
+  if (onDemand) await markSearchRunning(env.DB, requestedSearchId, nowDate);
   await markRunning(env.DB, message.body.messageId, attempts, now);
   try {
     const response = await adapter.collectSourceEntries(state ?? {}, options);
@@ -244,7 +366,7 @@ async function processMessage(message, env, options = {}) {
       policyResult: response.policyResult,
       status,
     }, nowDate);
-    await finalize(env.DB, run.collection_run_id, nowDate);
+    await finalizeRuns(env.DB, run, requestedSearchId, nowDate, finalize, finalizeSearch);
     message.ack();
     return { status, sourceKey: source.key, metrics };
   } catch (error) {
@@ -254,12 +376,12 @@ async function processMessage(message, env, options = {}) {
     await recordSourceFailure(env.DB, source, error, nowDate);
     if (temporary) {
       if (status === "dead_lettered") {
-        await finalize(env.DB, run.collection_run_id, nowDate);
+        await finalizeRuns(env.DB, run, requestedSearchId, nowDate, finalize, finalizeSearch);
       }
       message.retry({ delaySeconds: retryDelaySeconds(attempts) });
       return { status, sourceKey: source.key };
     }
-    await finalize(env.DB, run.collection_run_id, nowDate);
+    await finalizeRuns(env.DB, run, requestedSearchId, nowDate, finalize, finalizeSearch);
     message.ack();
     return { status, sourceKey: source.key };
   }

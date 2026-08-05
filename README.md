@@ -447,3 +447,81 @@ After local review, the recommended production order is:
 5. Verify `/api/visit`, cookie attributes, visitor counts, comparison, shortlist, preferences, source-language filtering, and mobile layout.
 
 No Queue, Cron, domain, secret, or collector change is required for Phase 8A.
+
+## Phase 8B - Approved-source search
+
+Phase 8B adds an explicit **Search approved sources** action when a successful D1 response has no positions matching at least one active API-supported filter. The action is never shown for sample fallback data, an unknown D1 state, an unfiltered empty list, or an empty Saved positions view.
+
+> Search approved sources refreshes ResearchZeal's reviewed sources and then applies the user's filters. It does not search the entire web.
+
+The workflow is database-first. `POST /api/source-search` re-runs the same active-public-job SQL used by `GET /api/jobs`; an existing match returns immediately without Queue work or rate-limit consumption. Equivalent successful, partial, and no-results searches are cached in D1 for 12 hours. Failed searches are not reused. Only a new, uncached, zero-result request can create an `on_demand_search` collection run and version-2 Queue messages.
+
+The four code-controlled approved sources remain:
+
+- `imechanica-job-channel`
+- `ornl-postdoctoral-jobs`
+- `berkeley-lab-postdoctoral`
+- `embl-postdoctoral-jobs`
+
+Version-2 messages contain only generated request/run/message identifiers, one registry source key, a timestamp, and the `on_demand` reason. They contain no query text, URL, HTML, cookie, visitor hash, or credential. Version-1 scheduled messages and the existing `17 1,13 * * *` UTC Cron remain unchanged.
+
+Each source keeps its reviewed adapter, robots and content-policy checks, request/page limits, health backoff, and retry classification. A source successfully refreshed within the preceding 60 minutes is safely reused instead of crawled again. Backoff and policy pauses are never bypassed. The collectors fetch their complete bounded postdoc listings; user filters are applied only to stored active D1 records after source runs finish.
+
+The status endpoint is:
+
+```text
+GET /api/source-search/:requestId
+```
+
+It returns only bounded progress and result counts. The browser polls about every 2.5 seconds for at most 90 seconds, stores only the opaque request ID plus canonical query key in `sessionStorage`, and reloads `/api/jobs` after matching results become available. Comparison IDs, shortlist IDs, preferences, and language filters remain local and survive that refresh.
+
+### Privacy, security, and limits
+
+New refresh requests are limited to three per visitor per UTC hour and 20 globally per UTC hour. One atomic D1 statement checks both scopes and increments both counters or neither, so a rejected visitor cannot consume global allowance and global exhaustion cannot consume visitor allowance. The active-query claim is created before rate consumption, so simultaneous equivalent searches create one request, one collection run, one Queue fan-out, and one accepted rate-limit increment. Existing D1 results, active-query reuse, and 12-hour cached searches do not consume those limits. The existing secure `rz_visitor_id` cookie is reused; when absent or malformed, the Worker creates the same random UUID format with `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, and about a one-year maximum age. Only its SHA-256 hash is used for visitor-scoped limits.
+
+Approved-source search does not read or store IP addresses, `CF-Connecting-IP`, geolocation, user agents, fingerprints, email, or account data. Requests have a 4 KB body limit, an exact property allow-list, bounded string fields, a strict deadline enum, same-origin validation when `Origin` is present, parameterized D1 statements, safe public errors, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`.
+
+This phase adds no AI, embeddings, semantic search, automatic translation, Google/Bing crawling, LinkedIn/Indeed crawling, arbitrary URLs, accounts, CV upload, email alerts, paid API, Worker, Queue, Cron expression, secret, or domain change.
+
+### Migration 0006
+
+`migrations/0006_approved_source_search.sql` adds:
+
+- `source_search_requests`, including canonical query hashes, saved filters, lifecycle/progress fields, 12-hour cache expiry, and a partial unique index preventing two queued/running requests for the same query;
+- `source_search_rate_limits`, containing only visitor/global scope keys, UTC-hour windows, and bounded counters.
+
+The migration inserts no fake search or rate-limit rows and does not alter jobs, collection history, source runs, job observations, collector health, visitor tables, or Queue state. The existing scheduled handler first recovers queued/running on-demand searches older than 45 minutes: it creates truthful failed accounting rows for missing sources, fails only remaining active source runs, preserves completed source metrics, and finalizes the collection and search without allowing incomplete accounting to report success. It then performs best-effort cleanup of terminal search requests older than seven days and rate windows older than 48 hours. Recovery or cleanup failure cannot block normal source scheduling.
+
+### Local validation
+
+Use local or isolated D1 only:
+
+```bash
+npm run test:collector
+npm run test:collector:live
+npm run lint
+npm run build
+npm run deploy:dry
+git diff --check
+```
+
+For a fresh isolated migration review:
+
+```bash
+npx wrangler d1 migrations apply postdoc-researchzeal-db --local --persist-to ./.tmp/phase8b-d1
+npx wrangler d1 execute postdoc-researchzeal-db --local --persist-to ./.tmp/phase8b-d1 --command="PRAGMA foreign_key_check;"
+```
+
+For a combined local Worker/API/assets review, apply migration 0006 locally before starting `npm run dev:worker`. Local Queue simulation may contact the four approved public sources; it never modifies production D1.
+
+### Production order
+
+Migration 0006 must be applied through Wrangler migration tracking **before** deploying code that exposes the new endpoints:
+
+1. Review the Worker, Queue v1/v2 compatibility, UI, migration, deterministic tests, live source test, and dry run.
+2. Apply `0006_approved_source_search.sql` to production D1 through the approved operator workflow.
+3. Commit, push, and merge only after review.
+4. Allow the existing Git-connected deployment to update the single Worker and static assets.
+5. Verify database-first results, cached no-results, Queue v2 processing, rate limits, status polling, and scheduled cleanup.
+
+Operational limitations remain deliberate: external source availability can delay or partially complete a refresh; the browser stops polling after 90 seconds even though Queue work may continue; cached terminal answers can remain for up to 12 hours; source cooldown is 60 minutes; and approved-source search covers only the four reviewed sources, not the entire internet.
