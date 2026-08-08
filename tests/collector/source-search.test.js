@@ -910,16 +910,16 @@ test("frontend mapping sends only API filters and offer safety excludes fallback
   });
   assert.equal(Object.hasOwn(approvedSourceSearchFilters(uiFilters), "sourceLanguage"), false);
   assert.equal(shouldOfferApprovedSourceSearch({
-    dataSource: "d1", resultCount: 0, savedOnly: false, filters: uiFilters,
+    dataSource: "d1", total: 0, savedOnly: false, filters: uiFilters,
   }), true);
   assert.equal(shouldOfferApprovedSourceSearch({
-    dataSource: "fallback", resultCount: 0, savedOnly: false, filters: uiFilters,
+    dataSource: "fallback", total: 0, savedOnly: false, filters: uiFilters,
   }), false);
   assert.equal(shouldOfferApprovedSourceSearch({
-    dataSource: "d1", resultCount: 0, savedOnly: true, filters: uiFilters,
+    dataSource: "d1", total: 0, savedOnly: true, filters: uiFilters,
   }), false);
   assert.equal(shouldOfferApprovedSourceSearch({
-    dataSource: "d1", resultCount: 0, savedOnly: false, filters: {},
+    dataSource: "d1", total: 0, savedOnly: false, filters: {},
   }), false);
   assert.equal(approvedSourceSearchKey(uiFilters), approvedSourceSearchKey({
     ...uiFilters, keyword: "  QUANTUM  ",

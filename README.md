@@ -525,3 +525,52 @@ Migration 0006 must be applied through Wrangler migration tracking **before** de
 5. Verify database-first results, cached no-results, Queue v2 processing, rate limits, status polling, and scheduled cleanup.
 
 Operational limitations remain deliberate: external source availability can delay or partially complete a refresh; the browser stops polling after 90 seconds even though Queue work may continue; cached terminal answers can remain for up to 12 hours; source cooldown is 60 minutes; and approved-source search covers only the four reviewed sources, not the entire internet.
+
+## Phase 8C - Paginated results and URL-preserved filters
+
+Phase 8C prepares the public results list for a substantially larger active dataset without adding a database migration or Cloudflare resource. The browser requests 20 D1 rows at a time with explicit `limit` and `offset` values. The first page replaces the current result set; **Load more positions** appends the next page and leaves existing cards, focus, comparison state, shortlist state, and preferences intact.
+
+The public jobs query keeps its existing `posted_at DESC, created_at DESC` business order and adds `id DESC` as a deterministic final tie-breaker. Appended pages merge by stable job ID: new IDs retain API order, while an ID already displayed is updated in place rather than rendered twice. The next offset advances by the number of server rows consumed (`page.offset + page.count`), not by the unique visible-card count.
+
+Initial requests and Load More requests use separate abort controllers plus a canonical-query generation check. Changing an applied filter, navigating Back or Forward, refreshing from Phase 8B, or unmounting the component invalidates older work so a slow response cannot mix results from different queries. Only one Load More request can be active. An initial API failure may show the existing controlled sample fallback; a later-page failure preserves already loaded D1 cards and provides **Retry loading more** at the same offset.
+
+The result header distinguishes the loaded-card count from the total matching D1 count, for example `Showing 20 of 145 matching positions.` When the last page is consumed it reports that all matching positions are loaded. Updates are exposed through a polite live region, loading containers use `aria-busy`, and all Load More and retry controls remain ordinary keyboard-accessible buttons with mobile-sized touch targets.
+
+### URL filter behavior
+
+The canonical public query parameters are:
+
+- `keyword`
+- `country`
+- `research_area`
+- `language`
+- `deadline` (`7`, `30`, `60`, `open`, or `none`; `any` is omitted)
+
+Values are bounded and encoded with `URLSearchParams`. The URL contains no offset, result total, visitor identifier, comparison ID, shortlist ID, preference setting, or approved-source request ID. Select filters apply immediately. Keyword typing uses a short debounce so browser history does not receive an entry for every keystroke. Back and Forward restore the controls and load page one for the restored query without clearing local comparison, shortlist, or preference state.
+
+The distinct **Source language** control keeps its Phase 8A browser-local meaning: it compares normalized `job.source_language` values only across positions already loaded. It is not mapped to the advertisement-language filter, is not sent to Phase 8B, and is not placed in the public URL. Preference matching continues to annotate loaded jobs with transparent scores and reasons; it does not reorder server pages or claim a global ranking.
+
+> Phase 8C preserves applied search filters in the URL. The exact Load More depth and scroll position are not persisted.
+
+A refresh or shared link therefore restores the filters and requests offset zero. Offset pagination can also shift when new jobs are inserted between page requests; frontend ID merging prevents visible duplicates, while cursor pagination remains a possible future enhancement.
+
+### Phase 8B and fallback integration
+
+Approved-source search remains explicit and appears only after a settled, successful D1 first page reports `total: 0` for at least one meaningful API-supported filter. It stays hidden during initial loading, for API failure, for sample fallback, for Saved-only mode, and for later-page errors. A completed approved-source refresh reloads only offset zero for the same URL filters.
+
+A legitimate D1 zero result is never treated as an API failure. Sample fallback cards are never combined with a D1 total, cannot use Load More, and cannot trigger approved-source collection. Sample positions retain their existing demonstration labels.
+
+### Local validation
+
+Run locally or against an isolated local D1 state only:
+
+```bash
+npm run test:collector
+npm run test:collector:live
+npm run lint
+npm run build
+npm run deploy:dry
+git diff --check
+```
+
+For pagination review, use more than 45 active local jobs and verify offsets 0, 20, and 40, stable equal-timestamp boundaries, URL restoration, Back/Forward navigation, Load More retry, 1440px desktop layout, and 390px mobile layout. Phase 8C changes no migration, binding, Queue, Cron trigger, Worker route, domain, secret, or production data. Production rollout remains the normal reviewed Git-connected build; do not manually deploy this implementation.

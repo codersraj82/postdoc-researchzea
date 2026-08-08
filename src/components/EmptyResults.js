@@ -1,4 +1,7 @@
-export default function EmptyResults({ onClear }) {
+export default function EmptyResults({
+  onClear,
+  title = "No matching positions are currently indexed.",
+}) {
   return (
     <div className="rounded-2xl border border-dashed border-slate-600 bg-[#091625] px-6 py-14 text-center">
       <div className="mx-auto grid size-11 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-slate-300">
@@ -7,7 +10,7 @@ export default function EmptyResults({ onClear }) {
           <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
         </svg>
       </div>
-      <h3 className="mt-5 text-xl font-semibold text-white">No matching positions found</h3>
+      <h3 className="mt-5 text-xl font-semibold text-white">{title}</h3>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-slate-400">
         Try removing a filter or searching with a broader research keyword.
       </p>

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import AiMatchingPreview from "@/components/AiMatchingPreview";
 import EmailAlertsPreview from "@/components/EmailAlertsPreview";
 import Footer from "@/components/Footer";
@@ -15,7 +16,9 @@ export default function HomePage() {
       <Header />
       <main>
         <HeroSection />
-        <PostdocSearch jobs={jobs} referenceDate={referenceDate.toISOString()} />
+        <Suspense fallback={null}>
+          <PostdocSearch jobs={jobs} referenceDate={referenceDate.toISOString()} />
+        </Suspense>
         <EmailAlertsPreview />
         <AiMatchingPreview />
       </main>
