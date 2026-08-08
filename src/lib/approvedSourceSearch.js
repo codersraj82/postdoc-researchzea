@@ -38,12 +38,18 @@ export function approvedSourceSearchKey(filters) {
 
 export function shouldOfferApprovedSourceSearch({
   dataSource,
-  resultCount,
+  total,
   savedOnly,
   filters,
+  initialLoading = false,
+  initialError = null,
+  loadingMore = false,
 }) {
   return dataSource === "d1"
-    && resultCount === 0
+    && total === 0
     && savedOnly !== true
+    && initialLoading !== true
+    && !initialError
+    && loadingMore !== true
     && hasApprovedSourceSearchFilter(filters);
 }

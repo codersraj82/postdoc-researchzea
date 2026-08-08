@@ -195,7 +195,7 @@ export async function searchPublicJobs(db, filters, options = {}) {
        WHERE js.job_id = jobs.id AND js.observation_state = 'active') AS source_count
     FROM jobs
     ${built.whereClause}
-    ORDER BY posted_at DESC, created_at DESC
+    ORDER BY posted_at DESC, created_at DESC, id DESC
     LIMIT ? OFFSET ?
   `;
   const countQuery = `SELECT COUNT(*) AS total FROM jobs ${built.whereClause}`;
